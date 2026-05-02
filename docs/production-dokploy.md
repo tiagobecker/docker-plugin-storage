@@ -1,31 +1,26 @@
-# Dokploy Setup
+# Dokploy And Coolify Setup
 
-This guide describes the DPS path for real Dokploy-managed Linux servers.
+This guide covers DPS on Docker hosts managed by Dokploy, Coolify, or a similar Compose-based PaaS.
 
-DPS now has one storage model: every Docker volume is backed by its own ext4 filesystem image and mounted through a loop device. This is the expected path on ordinary Ubuntu cloud images, including hosts where the root filesystem is ext4.
+DPS is installed on the Docker host. Once installed, any Compose project on that host can request a limited volume with `driver: dps`.
+
+## How DPS Mounts Volumes
 
 ```text
-Dokploy Compose
-  -> Docker creates volume with driver: dps
+Compose / PaaS
+  -> Docker creates a named volume with driver: dps
   -> DPS creates /var/lib/dps/volume-images/<volume>.img
   -> DPS formats it as ext4 with the requested inode count
   -> DPS mounts it at /mnt/dps/volumes/<volume>
   -> DPS returns /mnt/dps/volumes/<volume>/data to Docker
-  -> Docker bind-mounts that clean data path into the container
+  -> Docker bind-mounts that clean data directory into the container
 ```
 
-Dokploy does not need to know about the backing image. It only needs Compose volumes using `driver: dps`.
-The extra `data` subdirectory is intentional: ext filesystems create
-`lost+found` at the filesystem root, and images such as Postgres require an
-empty data directory on first boot.
-
-## Upgrade Note
-
-If this host used an earlier DPS build with multiple storage backends, treat this version as a storage-layout change. For disposable test hosts, remove old DPS volumes and state before redeploying. For data that matters, back up first, create fresh DPS volumes with this version, and restore into them.
+The extra `data` directory is part of the design. It hides filesystem metadata such as `lost+found` from applications, while keeping the container inside the same limited filesystem.
 
 ## Install On Ubuntu 24.04 arm64
 
-Run this on each Docker host managed by Dokploy:
+Run this on each Docker host that should support DPS volumes:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
@@ -41,32 +36,24 @@ Defaults:
 - `DPS_DEFAULT_VOLUME_INODES=200000`
 - `DPS_ARCHIVE_POLICY=offline`
 
-The installer is intentionally conservative:
+The installer prints a visible success/failure summary and creates a small test volume before reporting success.
 
-- it refuses to run if a managed Docker plugin named like `dps` already exists;
-- it removes stale unmanaged DPS `.spec` files;
-- it removes a stale DPS socket before starting `dpsd`;
-- it creates and mounts a small DPS test volume before reporting success;
-- it stops/removes the `dpsd` systemd unit and socket if that test fails.
-
-If the conflict check is intentionally too strict:
-
-```sh
-sudo env DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT=true bash install-dps.sh
-```
-
-To place volume data on a different mounted disk or directory, set `DPS_IMAGE_ROOT`:
+To place volume image files on another disk or directory:
 
 ```sh
 sudo env DPS_IMAGE_ROOT=/srv/dps-images bash install-dps.sh
 ```
 
-Use a location backed by enough local storage. DPS does not format disks or create partitions.
+To change the default volume size:
+
+```sh
+sudo env DPS_DEFAULT_VOLUME_SIZE=2G bash install-dps.sh
+```
 
 ## Validate The Service
 
 ```sh
-systemctl status dpsd
+systemctl status dpsd --no-pager --full
 journalctl -u dpsd -n 100 --no-pager
 cat /etc/dps/dpsd.env
 ```
@@ -79,9 +66,7 @@ DPS_MOUNT_ROOT=/mnt/dps
 DPS_IMAGE_ROOT=/var/lib/dps/volume-images
 ```
 
-## Use DPS In Dokploy Compose
-
-Example:
+## Compose Example
 
 ```yaml
 services:
@@ -101,7 +86,18 @@ volumes:
       inodes: "500000"
 ```
 
-If the global defaults are acceptable, the volume may omit `driver_opts`:
+For smaller apps:
+
+```yaml
+volumes:
+  appdata:
+    driver: dps
+    driver_opts:
+      size: 2G
+      inodes: "50000"
+```
+
+If defaults are acceptable:
 
 ```yaml
 volumes:
@@ -111,14 +107,14 @@ volumes:
 
 ## Validate Limits
 
-Dokploy or Compose may prefix the real volume name with the project/app name.
+PaaS tools usually prefix the real Docker volume name with the project/app name.
 
 ```sh
 docker volume ls | grep pgdata
 docker volume inspect <real-volume-name>
 ```
 
-Check the mounted path inside the container:
+Check from inside the container:
 
 ```sh
 docker ps
@@ -136,48 +132,80 @@ Filesystem     Inodes IUsed IFree IUse% Mounted on
 /dev/loopX      500000 ...   ...   ... /var/lib/postgresql/data
 ```
 
-`/dev/loopX` is correct. It means DPS mounted the per-volume filesystem image.
+`/dev/loopX` is expected. Linux is presenting the DPS image file as a mounted block device.
+
+## Existing Volumes
+
+Docker does not convert an existing volume from `local` to `dps`. If an app was deployed before adding DPS:
+
+1. Stop/remove the app through Dokploy/Coolify.
+2. Back up or export existing data if it matters.
+3. Remove or rename the old Docker volume.
+4. Redeploy with `driver: dps`.
+
+For disposable test data:
+
+```sh
+docker volume rm <real-volume-name>
+```
+
+## Resize
+
+Resize is offline. Stop the app in the PaaS UI first.
+
+```sh
+dpsctl resize <volume> 10G 800000
+```
+
+Behavior:
+
+- increasing size grows the existing image when possible;
+- decreasing size recreates the image and restores data;
+- changing inode count recreates the filesystem;
+- shrink is refused unless current usage fits with 10% headroom;
+- mounted volumes are refused.
+
+## Snapshots And Backups
+
+Default policy is `offline`, so `snapshot` and `backup-volume` are refused while Docker still has active references to the volume.
+
+```sh
+dpsctl snapshot pgdata before-upgrade
+dpsctl backup before-upgrade /srv/dps-backups
+dpsctl backup-volume pgdata s3://bucket/prod pgdata-manual
+```
+
+For databases, stop writes first or use tested hooks:
+
+```sh
+dpsctl --archive-policy hooked \
+  --pre-archive-hook '/etc/dps/hooks/postgres-pre.sh' \
+  --post-archive-hook '/etc/dps/hooks/postgres-post.sh' \
+  backup-volume pgdata s3://bucket/prod pgdata-hooked
+```
 
 ## Uninstall DPS
 
-Use the uninstall script when the host should stop exposing the DPS driver. By
-default it removes only DPS software and integration points:
-
-- managed Docker plugins named like `dps` or `docker-plugin-storage`;
-- unmanaged plugin socket/spec files;
-- `dpsd`/`dps` systemd services;
-- `/etc/dps`;
-- `/opt/docker-plugin-storage`;
-- `/usr/local/bin/dpsd` and `/usr/local/bin/dpsctl`.
-
-It does not remove Docker, Dokploy, app containers, Docker volumes, or DPS
-volume image data by default. If containers still reference DPS volumes, the
-script stops and asks you to handle the app lifecycle in Dokploy first.
+The uninstall script removes DPS software and integration points by default, but preserves apps, containers, Docker volumes, and DPS volume image data.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
 sudo bash uninstall-dps-host.sh
 ```
 
-For non-interactive use:
+Non-interactive:
 
 ```sh
 sudo env DPS_UNINSTALL_CONFIRM=erase-dps bash uninstall-dps-host.sh
 ```
 
-On a disposable test host where Docker should be restarted after cleanup:
-
-```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
-```
-
-To also remove DPS state, image files, and mount directories, opt in explicitly:
+Optional data removal:
 
 ```sh
 sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash uninstall-dps-host.sh
 ```
 
-To also remove Docker volume metadata using the DPS driver, opt in explicitly:
+Optional Docker volume metadata removal:
 
 ```sh
 sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=true bash uninstall-dps-host.sh
@@ -185,14 +213,7 @@ sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=tru
 
 ## Diagnose Deploy Failures
 
-When Dokploy only reports `Error starting compose`, first separate the failure:
-
-- Docker daemon unhealthy;
-- Dokploy/Swarm failing before the volume is created;
-- existing Docker volume still using the `local` driver;
-- DPS service/socket/mount failure.
-
-Run the diagnostic script on the Docker host:
+When the PaaS UI reports only a generic Compose failure, collect host diagnostics:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o diagnose-dokploy-dps.sh
@@ -205,36 +226,13 @@ Optional DPS driver test:
 sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash diagnose-dokploy-dps.sh
 ```
 
-If a previously deployed app created the volume without DPS, `docker volume inspect <real-volume-name>` will show `"Driver": "local"`. Docker will not convert that volume to `dps`; remove the stopped app/service and the old volume, then redeploy.
+Common causes:
 
-## Resize
-
-Resize is offline. Stop the app in Dokploy first.
-
-```sh
-dpsctl resize <volume> 40G 800000
-```
-
-Increasing size grows the ext4 image when possible. Shrinking size or changing inode count recreates the image and restores data after checking that current usage fits with 10% headroom.
-
-## Snapshots And Backups
-
-Default policy is `offline`, so snapshot and `backup-volume` are refused while the volume is mounted by Docker.
-
-```sh
-dpsctl snapshot pgdata before-upgrade
-dpsctl backup before-upgrade /srv/dps-backups
-dpsctl backup-volume pgdata s3://bucket/prod pgdata-manual
-```
-
-For databases, stop writes or use tested hooks:
-
-```sh
-dpsctl --archive-policy hooked \
-  --pre-archive-hook '/etc/dps/hooks/postgres-pre.sh' \
-  --post-archive-hook '/etc/dps/hooks/postgres-post.sh' \
-  backup-volume pgdata s3://bucket/prod pgdata-hooked
-```
+- Docker daemon unhealthy;
+- app still using an existing `local` volume;
+- volume referenced by a stopped/old container;
+- app container failing after volume creation;
+- DPS service/socket/mount issue.
 
 ## Managed Plugin Alternative
 
@@ -247,19 +245,4 @@ sudo docker plugin set dps:latest DPS_ARCHIVE_POLICY=offline
 sudo docker plugin enable dps:latest
 ```
 
-The managed plugin package requests `CAP_SYS_ADMIN` and loop device access. It
-declares `/dev/loop-control` and `/dev/loop0` through `/dev/loop7`, which is
-needed for Docker Desktop managed plugin tests. For production Dokploy hosts,
-the unmanaged systemd service remains the recommended path because it uses the
-host device namespace directly.
-
-Compose can then use:
-
-```yaml
-volumes:
-  pgdata:
-    driver: dps:latest
-    driver_opts:
-      size: 5G
-      inodes: "500000"
-```
+For production PaaS hosts, the unmanaged systemd service is recommended because it is easier to observe, restart, and debug.
