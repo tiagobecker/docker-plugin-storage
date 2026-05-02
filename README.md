@@ -85,6 +85,20 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 sudo bash reset-dps-host.sh
 ```
 
+For a deeper uninstall that removes DPS Docker volumes, managed/unmanaged plugin
+state, loop mounts, image files, binaries, and systemd units:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
+sudo bash uninstall-dps-host.sh
+```
+
+On a disposable test host where Docker should be restarted after cleanup:
+
+```sh
+sudo env DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
+```
+
 If Dokploy shows only `Error starting compose`, collect host diagnostics:
 
 ```sh

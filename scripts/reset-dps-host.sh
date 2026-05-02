@@ -4,6 +4,10 @@ set -Eeuo pipefail
 # Destructive DPS reset for disposable Linux/Dokploy test hosts.
 # It removes DPS service files, binaries, metadata, images, mountpoints,
 # old plugin specs, sockets, and the local source checkout.
+#
+# For a deeper cleanup that also removes Docker volume metadata using the DPS
+# driver, managed Docker plugin instances, and loop devices, use:
+# scripts/uninstall-dps-host.sh
 
 DPS_INSTALL_DIR="${DPS_INSTALL_DIR:-/opt/docker-plugin-storage}"
 DPS_ROOT="${DPS_ROOT:-/var/lib/dps}"

@@ -162,6 +162,46 @@ docker volume ls
 docker volume rm <old-volume>
 ```
 
+## Deep Uninstall
+
+If a test host needs to return to a clean state before reinstalling DPS, use the
+deep uninstall script. It removes only DPS-related state:
+
+- Docker volumes using `driver: dps` or `driver: dps:*`;
+- managed Docker plugins named like `dps` or `docker-plugin-storage`;
+- unmanaged plugin socket/spec files;
+- `dpsd`/`dps` systemd services;
+- DPS loop mounts and loop devices;
+- `/etc/dps`, `/var/lib/dps`, `/mnt/dps`, `/opt/docker-plugin-storage`;
+- `/usr/local/bin/dpsd` and `/usr/local/bin/dpsctl`.
+
+It does not remove Docker, Dokploy, ordinary `local` volumes, or unrelated
+containers.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
+sudo bash uninstall-dps-host.sh
+```
+
+For non-interactive use:
+
+```sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps bash uninstall-dps-host.sh
+```
+
+On a disposable test host where Docker should be restarted after cleanup:
+
+```sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
+```
+
+If normal unmount fails because the host has stale busy mounts and all DPS data
+can be discarded:
+
+```sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_LAZY_UNMOUNT=true DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
+```
+
 ## Diagnose Deploy Failures
 
 When Dokploy only reports `Error starting compose`, first separate the failure:
