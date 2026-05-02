@@ -5,12 +5,8 @@ set -Eeuo pipefail
 # Intended for Dokploy-managed Linux servers where Docker is already installed.
 #
 # Default mode is "auto" so the script can install on ordinary ext4 hosts.
-# For the best production-like path, pass a dedicated block device explicitly:
-#
-#   DPS_XFS_DEVICE=/dev/vdb DPS_FORMAT_XFS=true DPS_POOL_MODE=direct bash install-ubuntu-24.04-arm64-dokploy.sh
-#
-# The script never formats disks unless DPS_XFS_DEVICE is set and
-# DPS_FORMAT_XFS=true is explicitly provided.
+# It does not partition or format disks. If DPS_POOL_MODE=direct is used,
+# DPS_MOUNT_ROOT must already be mounted as XFS with prjquota/pquota.
 
 DPS_REPO_URL="${DPS_REPO_URL:-https://github.com/tiagobecker/docker-plugin-storage.git}"
 DPS_REF="${DPS_REF:-main}"
@@ -28,9 +24,6 @@ DPS_SERVICE_NAME="${DPS_SERVICE_NAME:-dpsd}"
 DPS_GO_IMAGE="${DPS_GO_IMAGE:-golang:1.24-alpine}"
 DPS_TARGET_ARCH="${DPS_TARGET_ARCH:-arm64}"
 DPS_ALLOW_UNSUPPORTED_OS="${DPS_ALLOW_UNSUPPORTED_OS:-false}"
-DPS_XFS_DEVICE="${DPS_XFS_DEVICE:-}"
-DPS_FORMAT_XFS="${DPS_FORMAT_XFS:-false}"
-DPS_WRITE_FSTAB="${DPS_WRITE_FSTAB:-true}"
 
 log() {
   printf '[dps-install] %s\n' "$*"
@@ -89,92 +82,6 @@ install_packages() {
 check_docker() {
   need_cmd docker
   docker version >/dev/null || die "Docker is installed but not reachable. Run this script on the Docker host."
-}
-
-is_true() {
-  case "$1" in
-    true|1|yes|y|on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-prepare_xfs_mount() {
-  [ "$DPS_XFS_DEVICE" != "" ] || return 0
-
-  need_cmd blkid
-  need_cmd findmnt
-  need_cmd lsblk
-  need_cmd mkfs.xfs
-  need_cmd mount
-
-  [ -b "$DPS_XFS_DEVICE" ] || die "DPS_XFS_DEVICE is not a block device: $DPS_XFS_DEVICE"
-
-  if [ "$DPS_POOL_MODE" = "auto" ]; then
-    log "DPS_XFS_DEVICE was provided; switching DPS_POOL_MODE from auto to direct"
-    DPS_POOL_MODE="direct"
-  fi
-  [ "$DPS_POOL_MODE" = "direct" ] || die "DPS_XFS_DEVICE requires DPS_POOL_MODE=direct or auto"
-
-  mkdir -p "$DPS_MOUNT_ROOT"
-
-  current_mount="$(findmnt -rn --source "$DPS_XFS_DEVICE" --output TARGET | head -n 1 || true)"
-  if [ "$current_mount" != "" ] && [ "$current_mount" != "$DPS_MOUNT_ROOT" ]; then
-    die "$DPS_XFS_DEVICE is already mounted at $current_mount; refusing to reuse it for $DPS_MOUNT_ROOT"
-  fi
-
-  if mountpoint -q "$DPS_MOUNT_ROOT"; then
-    mounted_source="$(findmnt -no SOURCE "$DPS_MOUNT_ROOT" || true)"
-    [ "$mounted_source" = "$DPS_XFS_DEVICE" ] || die "$DPS_MOUNT_ROOT is already mounted from $mounted_source, not $DPS_XFS_DEVICE"
-    ensure_fstab_entry "$DPS_XFS_DEVICE"
-    return 0
-  fi
-
-  child_count="$(lsblk -rn -o NAME "$DPS_XFS_DEVICE" | wc -l | tr -d ' ')"
-  if [ "$child_count" != "1" ]; then
-    die "$DPS_XFS_DEVICE appears to contain child partitions. Pass the intended partition, for example /dev/vdb1."
-  fi
-
-  existing_fstype="$(blkid -o value -s TYPE "$DPS_XFS_DEVICE" 2>/dev/null || true)"
-  if [ "$existing_fstype" != "xfs" ]; then
-    if ! is_true "$DPS_FORMAT_XFS"; then
-      die "$DPS_XFS_DEVICE is ${existing_fstype:-unformatted}; set DPS_FORMAT_XFS=true to format it as XFS"
-    fi
-    log "formatting $DPS_XFS_DEVICE as XFS; existing data on this device will be destroyed"
-    systemctl stop "$DPS_SERVICE_NAME.service" >/dev/null 2>&1 || true
-    mkfs.xfs -f "$DPS_XFS_DEVICE"
-  else
-    log "$DPS_XFS_DEVICE is already XFS; mounting without formatting"
-  fi
-
-  ensure_fstab_entry "$DPS_XFS_DEVICE"
-  if is_true "$DPS_WRITE_FSTAB"; then
-    mount "$DPS_MOUNT_ROOT"
-  else
-    mount -o prjquota "$DPS_XFS_DEVICE" "$DPS_MOUNT_ROOT"
-  fi
-}
-
-ensure_fstab_entry() {
-  device="$1"
-  uuid="$(blkid -s UUID -o value "$device" 2>/dev/null || true)"
-  [ "$uuid" != "" ] || die "could not read UUID from $device"
-
-  if ! is_true "$DPS_WRITE_FSTAB"; then
-    return 0
-  fi
-
-  if grep -qs "[[:space:]]$DPS_MOUNT_ROOT[[:space:]]" /etc/fstab; then
-    if ! grep -qsE "^(UUID=$uuid|$device)[[:space:]]+$DPS_MOUNT_ROOT[[:space:]]" /etc/fstab; then
-      die "/etc/fstab already has an entry for $DPS_MOUNT_ROOT, but not for $device. Adjust it manually before continuing."
-    fi
-    log "/etc/fstab already has an entry for $DPS_MOUNT_ROOT"
-    return 0
-  fi
-
-  backup="/etc/fstab.dps.$(date +%Y%m%d%H%M%S).bak"
-  cp /etc/fstab "$backup"
-  printf 'UUID=%s %s xfs defaults,prjquota 0 2\n' "$uuid" "$DPS_MOUNT_ROOT" >>/etc/fstab
-  log "added $DPS_MOUNT_ROOT to /etc/fstab; backup saved at $backup"
 }
 
 checkout_source() {
@@ -328,7 +235,6 @@ main() {
   check_os
   check_arch
   install_packages
-  prepare_xfs_mount
   check_docker
   checkout_source
   build_binaries

@@ -64,12 +64,6 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 sudo bash install-dps.sh
 ```
 
-For the recommended direct XFS path with a dedicated empty cloud disk:
-
-```sh
-sudo env DPS_XFS_DEVICE=/dev/vdb DPS_FORMAT_XFS=true DPS_POOL_MODE=direct bash install-dps.sh
-```
-
 For a production-like Linux/Dokploy setup with a dedicated XFS mount, see [docs/production-dokploy.md](docs/production-dokploy.md).
 
 ## Host CLI
@@ -396,10 +390,10 @@ For local quota validation, see [docs/local-testing.md](docs/local-testing.md). 
 
 DPS has two practical operating profiles:
 
-- **Recommended path:** a dedicated XFS disk or partition mounted with project quotas, using `DPS_POOL_MODE=direct`.
-- **Compatibility path:** automatic loopback/fixed-image fallback, using the default `DPS_POOL_MODE=auto`.
+- **Universal path:** automatic loopback/fixed-image fallback, using the default `DPS_POOL_MODE=auto`.
+- **Direct XFS path:** a dedicated XFS disk, LVM logical volume, or partition mounted with project quotas, using `DPS_POOL_MODE=direct`.
 
-The compatibility path is useful and safe for development, Docker Desktop, and constrained environments, but it has more moving parts: loop devices, extra mounts, sparse image files, and offline resize constraints. The recommended path has fewer layers and is the better target for production I/O.
+The universal path is the expected path on most single-disk cloud images that boot from ext4. The direct XFS path has fewer layers and is the better target for heavy production I/O, but it requires host storage prepared outside DPS. Docker application images do not need to use XFS; the backing filesystem is a host concern.
 
 Best practice by scenario:
 

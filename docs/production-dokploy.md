@@ -2,7 +2,9 @@
 
 This guide describes the recommended way to test DPS on a real Linux cloud server running Docker and Dokploy.
 
-The preferred production-like setup is:
+The storage decision is made on the Docker host, not inside application images. Most cloud Ubuntu images use an ext4 root disk. In that common case DPS should run in `auto` mode and create its own XFS loopback pool. That is the universal path.
+
+The preferred high-I/O production setup, when the host has storage prepared for it, is:
 
 ```text
 Linux host
@@ -12,7 +14,7 @@ Linux host
   Dokploy deploying Compose files that declare driver: dps
 ```
 
-Dokploy does not need to know about XFS. Dokploy sends Compose definitions to Docker; Docker calls the DPS volume driver; DPS stores and limits the volumes under the XFS mount.
+Dokploy does not need to know about XFS. Dokploy sends Compose definitions to Docker; Docker calls the DPS volume driver; DPS stores and limits the volumes under the selected DPS backing store.
 
 ## 1. Quick Installer For Ubuntu 24.04 arm64
 
@@ -23,38 +25,26 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 sudo bash install-dps.sh
 ```
 
-Default behavior without a block device:
+Default behavior:
 
 - Installs `dpsd` and `dpsctl` into `/usr/local/bin`.
 - Runs DPS as a host systemd service named `dpsd`.
-- Uses `DPS_POOL_MODE=auto`, so ordinary ext4 hosts can run through the loopback XFS fallback.
+- Uses `DPS_POOL_MODE=auto`, so ordinary ext4 hosts run through the loopback XFS compatibility path.
 - Sets default volume limits to `10G` and `200000` inodes.
 - Requires limits by default with `DPS_REQUIRE_LIMITS=true`.
 
-For the recommended production-like XFS path on a new dedicated cloud disk, identify the disk first:
+This is expected on most single-disk cloud images:
 
 ```sh
-lsblk -f
+/dev/loopX xfs ... /mnt/dps/pool
 ```
 
-Then run the installer with an explicit device. This example formats `/dev/vdb`, mounts it at `/mnt/dps`, writes `/etc/fstab`, and starts DPS in direct XFS mode:
+It means DPS is using an XFS filesystem image on top of the host filesystem. Containers still see the configured `df -h`, `df -i`, and `ENOSPC` limits.
+
+For direct XFS mode, prepare `/mnt/dps` manually using a real block device, LVM logical volume, or existing XFS partition, then run:
 
 ```sh
 sudo env \
-  DPS_XFS_DEVICE=/dev/vdb \
-  DPS_FORMAT_XFS=true \
-  DPS_POOL_MODE=direct \
-  DPS_MOUNT_ROOT=/mnt/dps \
-  bash install-dps.sh
-```
-
-Warning: `DPS_FORMAT_XFS=true` destroys existing data on `DPS_XFS_DEVICE`. Use only a dedicated empty disk or partition.
-
-If the device is already formatted as XFS and only needs to be mounted, omit `DPS_FORMAT_XFS=true`:
-
-```sh
-sudo env \
-  DPS_XFS_DEVICE=/dev/vdb1 \
   DPS_POOL_MODE=direct \
   DPS_MOUNT_ROOT=/mnt/dps \
   bash install-dps.sh
@@ -64,20 +54,18 @@ For a different mount location:
 
 ```sh
 sudo env \
-  DPS_XFS_DEVICE=/dev/vdb \
-  DPS_FORMAT_XFS=true \
   DPS_POOL_MODE=direct \
   DPS_MOUNT_ROOT=/srv/dps \
   bash install-dps.sh
 ```
 
-The installer refuses `DPS_POOL_MODE=direct` unless the mountpoint is XFS with `prjquota` or `pquota`. It also refuses to format anything unless `DPS_XFS_DEVICE` and `DPS_FORMAT_XFS=true` are both provided.
+The installer refuses `DPS_POOL_MODE=direct` unless the mountpoint is already XFS with `prjquota` or `pquota`. It does not partition or format disks.
 
 Run the script on every Dokploy-managed Docker server that should support `driver: dps`.
 
 ## 2. Prepare XFS
 
-This manual path is useful when you prefer to prepare storage yourself before running the installer. Use a dedicated block device when possible. The example below uses `/dev/vdb`.
+This manual path is useful only when the server has a dedicated block device, LVM logical volume, or spare partition. The example below uses `/dev/vdb`.
 
 Warning: `mkfs.xfs` erases the target device.
 
