@@ -24,14 +24,65 @@ DPS_ALLOW_UNSUPPORTED_OS="${DPS_ALLOW_UNSUPPORTED_OS:-false}"
 DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT="${DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT:-false}"
 DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS="${DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS:-true}"
 DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE="${DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE:-true}"
+CURRENT_STEP="starting"
+
+banner() {
+  cat <<'EOF'
+======================================================================
+ DPS Installer
+======================================================================
+ Installs DPS as an unmanaged Docker VolumeDriver service.
+ Target: Ubuntu 24.04 arm64 with Docker already installed.
+ Storage: one ext4 image per Docker volume, mounted through loop.
+======================================================================
+EOF
+}
+
+section() {
+  CURRENT_STEP="$1"
+  printf '\n[dps-install] == %s ==\n' "$CURRENT_STEP"
+}
 
 log() {
   printf '[dps-install] %s\n' "$*"
 }
 
+success() {
+  printf '[dps-install] OK: %s\n' "$*"
+}
+
 die() {
-  printf '[dps-install] ERROR: %s\n' "$*" >&2
+  cat >&2 <<EOF
+
+======================================================================
+ DPS INSTALL FAILED
+======================================================================
+ Step: $CURRENT_STEP
+ Error: $*
+======================================================================
+EOF
   exit 1
+}
+
+on_error() {
+  code="$?"
+  line="$1"
+  cat >&2 <<EOF
+
+======================================================================
+ DPS INSTALL FAILED
+======================================================================
+ Step: $CURRENT_STEP
+ Line: $line
+ Exit code: $code
+
+Useful diagnostics:
+  systemctl status $DPS_SERVICE_NAME --no-pager --full
+  journalctl -u $DPS_SERVICE_NAME -n 120 --no-pager --full
+  docker volume ls | grep dps || true
+======================================================================
+EOF
+  exit "$code"
 }
 
 need_cmd() {
@@ -76,6 +127,7 @@ check_arch() {
 }
 
 install_packages() {
+  section "Install host packages"
   log "installing host packages"
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -86,11 +138,14 @@ install_packages() {
 }
 
 check_docker() {
+  section "Check Docker"
   need_cmd docker
   docker version >/dev/null || die "Docker is installed but not reachable. Run this script on the Docker host."
+  success "Docker is reachable"
 }
 
 check_managed_plugin_conflict() {
+  section "Check plugin conflicts"
   is_true "$DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT" && return 0
 
   conflicts="$(
@@ -117,6 +172,7 @@ Recommended cleanup on disposable test hosts:
 EOF
     exit 1
   fi
+  success "No managed DPS plugin conflict detected"
 }
 
 remove_stale_plugin_specs() {
@@ -131,6 +187,7 @@ remove_stale_plugin_specs() {
 }
 
 checkout_source() {
+  section "Fetch DPS source"
   log "checking out DPS source into $DPS_INSTALL_DIR"
   if [ -d "$DPS_INSTALL_DIR/.git" ]; then
     git -C "$DPS_INSTALL_DIR" fetch --tags origin
@@ -143,6 +200,7 @@ checkout_source() {
 }
 
 build_binaries() {
+  section "Build binaries"
   log "building linux/$DPS_TARGET_ARCH binaries with Docker image $DPS_GO_IMAGE"
   docker run --rm \
     --platform "linux/$DPS_TARGET_ARCH" \
@@ -160,15 +218,18 @@ build_binaries() {
 
   install -m 0755 "$DPS_INSTALL_DIR/bin/dpsd" /usr/local/bin/dpsd
   install -m 0755 "$DPS_INSTALL_DIR/bin/dpsctl" /usr/local/bin/dpsctl
+  success "Installed /usr/local/bin/dpsd and /usr/local/bin/dpsctl"
 }
 
 validate_mount_root() {
+  section "Prepare DPS paths"
   mkdir -p "$DPS_ROOT" "$DPS_IMAGE_ROOT" "$DPS_MOUNT_ROOT" "$(dirname "$DPS_SOCKET")"
   rm -f "$DPS_SOCKET"
   log "DPS will store volume images under $DPS_IMAGE_ROOT and mount volumes under $DPS_MOUNT_ROOT/volumes"
 }
 
 write_environment() {
+  section "Write configuration"
   log "writing /etc/dps/dpsd.env"
   mkdir -p /etc/dps
   cat >/etc/dps/dpsd.env <<EOF
@@ -181,9 +242,11 @@ DPS_ARCHIVE_POLICY=$DPS_ARCHIVE_POLICY
 DPS_SOCKET=$DPS_SOCKET
 EOF
   chmod 0644 /etc/dps/dpsd.env
+  success "Configuration written to /etc/dps/dpsd.env"
 }
 
 write_systemd_service() {
+  section "Write systemd service"
   log "writing systemd service $DPS_SERVICE_NAME.service"
   cat >"/etc/systemd/system/$DPS_SERVICE_NAME.service" <<'EOF'
 [Unit]
@@ -212,6 +275,7 @@ EOF
 }
 
 restart_service() {
+  section "Start DPS service"
   log "enabling and starting $DPS_SERVICE_NAME"
   systemctl daemon-reload
   systemctl enable "$DPS_SERVICE_NAME.service" >/dev/null
@@ -220,9 +284,11 @@ restart_service() {
     journalctl -u "$DPS_SERVICE_NAME.service" --no-pager -n 80
     die "$DPS_SERVICE_NAME failed to start"
   }
+  success "$DPS_SERVICE_NAME is active"
 }
 
 test_driver() {
+  section "Validate Docker volume driver"
   log "testing Docker volume driver"
   test_volume="dps_install_test_$(date +%s)"
   if ! docker volume create --driver dps --opt size=64M --opt inodes=4096 "$test_volume" >/dev/null; then
@@ -234,6 +300,7 @@ test_driver() {
     return 1
   fi
   docker volume rm "$test_volume" >/dev/null 2>&1 || true
+  success "DPS test volume created, mounted, inspected, and removed"
 }
 
 rollback_after_failed_test() {
@@ -261,7 +328,23 @@ run_test_driver_or_rollback() {
 print_next_steps() {
   cat <<EOF
 
-[dps-install] DPS installed successfully.
+======================================================================
+ DPS INSTALL COMPLETED SUCCESSFULLY
+======================================================================
+
+Service:
+  name:       $DPS_SERVICE_NAME
+  status:     active
+  socket:     $DPS_SOCKET
+
+Storage:
+  image root: $DPS_IMAGE_ROOT
+  mount root: $DPS_MOUNT_ROOT/volumes
+
+Defaults:
+  size:       $DPS_DEFAULT_VOLUME_SIZE
+  inodes:     $DPS_DEFAULT_VOLUME_INODES
+  archives:   $DPS_ARCHIVE_POLICY
 
 Docker Compose / Dokploy volume example:
 
@@ -286,12 +369,18 @@ Current DPS config:
   source /etc/dps/dpsd.env
   printf 'images=%s mount=%s root=%s\\n' "\$DPS_IMAGE_ROOT" "\$DPS_MOUNT_ROOT" "\$DPS_ROOT"
 
+======================================================================
+
 EOF
 }
 
 main() {
+  trap 'on_error "$LINENO"' ERR
+  banner
   as_root "$@"
+  section "Check operating system"
   check_os
+  section "Check CPU architecture"
   check_arch
   install_packages
   check_docker

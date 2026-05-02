@@ -84,25 +84,24 @@ The installer:
 
 Run it on every Dokploy-managed Docker host that should support `driver: dps`.
 
-For a disposable test host that previously ran an older DPS build, reset first:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/reset-dps-host.sh -o reset-dps-host.sh
-sudo bash reset-dps-host.sh
-```
-
-For a deeper uninstall that removes DPS Docker volumes, managed/unmanaged plugin
-state, loop mounts, image files, binaries, and systemd units:
+To uninstall DPS software without removing Dokploy apps, containers, Docker
+volumes, or DPS volume image data:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
 sudo bash uninstall-dps-host.sh
 ```
 
-On a disposable test host where Docker should be restarted after cleanup:
+On a test host where Docker should be restarted after uninstalling DPS:
 
 ```sh
 sudo env DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
+```
+
+To remove DPS data too, opt in explicitly:
+
+```sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash uninstall-dps-host.sh
 ```
 
 If Dokploy shows only `Error starting compose`, collect host diagnostics:
