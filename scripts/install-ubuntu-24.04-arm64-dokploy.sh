@@ -13,7 +13,7 @@ DPS_INSTALL_DIR="${DPS_INSTALL_DIR:-/opt/docker-plugin-storage}"
 DPS_ROOT="${DPS_ROOT:-/var/lib/dps}"
 DPS_MOUNT_ROOT="${DPS_MOUNT_ROOT:-/mnt/dps}"
 DPS_IMAGE_ROOT="${DPS_IMAGE_ROOT:-$DPS_ROOT/volume-images}"
-DPS_DEFAULT_VOLUME_SIZE="${DPS_DEFAULT_VOLUME_SIZE:-10G}"
+DPS_DEFAULT_VOLUME_SIZE="${DPS_DEFAULT_VOLUME_SIZE:-5G}"
 DPS_DEFAULT_VOLUME_INODES="${DPS_DEFAULT_VOLUME_INODES:-200000}"
 DPS_ARCHIVE_POLICY="${DPS_ARCHIVE_POLICY:-offline}"
 DPS_SOCKET="${DPS_SOCKET:-/run/docker/plugins/dps.sock}"
@@ -269,7 +269,7 @@ volumes:
   pgdata:
     driver: dps
     driver_opts:
-      size: 20G
+      size: 5G
       inodes: "500000"
 
 Validate inside an app container:

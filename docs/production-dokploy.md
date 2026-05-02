@@ -33,7 +33,7 @@ Defaults:
 - `DPS_ROOT=/var/lib/dps`
 - `DPS_IMAGE_ROOT=/var/lib/dps/volume-images`
 - `DPS_MOUNT_ROOT=/mnt/dps`
-- `DPS_DEFAULT_VOLUME_SIZE=10G`
+- `DPS_DEFAULT_VOLUME_SIZE=5G`
 - `DPS_DEFAULT_VOLUME_INODES=200000`
 - `DPS_ARCHIVE_POLICY=offline`
 
@@ -93,7 +93,7 @@ volumes:
   pgdata:
     driver: dps
     driver_opts:
-      size: 20G
+      size: 5G
       inodes: "500000"
 ```
 
@@ -126,7 +126,7 @@ Expected shape:
 
 ```text
 Filesystem      Size  Used Avail Use% Mounted on
-/dev/loopX       20G  ...   ...   ... /var/lib/postgresql/data
+/dev/loopX       5G   ...   ...   ... /var/lib/postgresql/data
 
 Filesystem     Inodes IUsed IFree IUse% Mounted on
 /dev/loopX      500000 ...   ...   ... /var/lib/postgresql/data
@@ -274,7 +274,7 @@ dpsctl --archive-policy hooked \
 ```sh
 make plugin-rootfs
 sudo docker plugin create dps:latest packaging/docker-plugin
-sudo docker plugin set dps:latest DPS_DEFAULT_VOLUME_SIZE=10G
+sudo docker plugin set dps:latest DPS_DEFAULT_VOLUME_SIZE=5G
 sudo docker plugin set dps:latest DPS_DEFAULT_VOLUME_INODES=200000
 sudo docker plugin set dps:latest DPS_ARCHIVE_POLICY=offline
 sudo docker plugin enable dps:latest
@@ -293,6 +293,6 @@ volumes:
   pgdata:
     driver: dps:latest
     driver_opts:
-      size: 20G
+      size: 5G
       inodes: "500000"
 ```

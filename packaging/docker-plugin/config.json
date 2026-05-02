@@ -32,7 +32,7 @@
     {
       "name": "DPS_DEFAULT_VOLUME_SIZE",
       "description": "Default per-volume size when driver_opts.size is omitted",
-      "value": "10G",
+      "value": "5G",
       "settable": [
         "value"
       ]

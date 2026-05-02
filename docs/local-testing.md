@@ -71,7 +71,7 @@ sudo rm -f /run/docker/plugins/dps.sock
 sudo sh -c 'nohup /usr/local/bin/dpsd \
   --root /var/lib/dps \
   --mount-root /mnt/dps \
-  --default-volume-size 10G \
+  --default-volume-size 5G \
   --default-volume-inodes 200000 \
   --socket /run/docker/plugins/dps.sock \
   >/tmp/dpsd.log 2>&1 &'

@@ -40,7 +40,7 @@ volumes:
   pgdata:
     driver: dps
     driver_opts:
-      size: 20G
+      size: 5G
       inodes: "500000"
 ```
 
@@ -75,7 +75,7 @@ The installer:
 - installs a systemd service named `dpsd`;
 - uses `/var/lib/dps/volume-images` for volume image files by default;
 - uses `/mnt/dps/volumes` for Docker-visible mountpoints;
-- sets default volume limits to `10G` and `200000` inodes;
+- sets default volume limits to `5G` and `200000` inodes;
 - creates a small test volume and runs `df -h` and `df -i`;
 - rolls back the service/socket if that test volume cannot be created and mounted.
 
@@ -130,7 +130,7 @@ sudo ./bin/dpsd \
   --root /var/lib/dps \
   --mount-root /mnt/dps \
   --image-root /var/lib/dps/volume-images \
-  --default-volume-size 10G \
+  --default-volume-size 5G \
   --default-volume-inodes 200000 \
   --socket /run/docker/plugins/dps.sock
 ```
@@ -150,7 +150,7 @@ Environment variables:
 | `DPS_ROOT` | `/var/lib/dps` | Metadata, snapshots, temporary files. |
 | `DPS_IMAGE_ROOT` | `<DPS_ROOT>/volume-images` | Volume image files. Put this on the storage path where data should live. |
 | `DPS_MOUNT_ROOT` | `/mnt/dps` | Docker-visible mount root. Volumes mount under `<DPS_MOUNT_ROOT>/volumes`. |
-| `DPS_DEFAULT_VOLUME_SIZE` | `10G` in packaged daemon/install script | Default size when Compose omits `driver_opts.size`. |
+| `DPS_DEFAULT_VOLUME_SIZE` | `5G` in packaged daemon/install script | Default size when Compose omits `driver_opts.size`. |
 | `DPS_DEFAULT_VOLUME_INODES` | `200000` in packaged daemon/install script | Default inode count when Compose omits `driver_opts.inodes`. |
 | `DPS_ARCHIVE_POLICY` | `offline` through installer | Snapshot/backup consistency policy. |
 | `DPS_PRE_ARCHIVE_HOOK` | empty | Hook command for `hooked` policy. |
@@ -258,7 +258,7 @@ docker plugin enable dps:latest
 Managed plugin configuration:
 
 ```sh
-docker plugin set dps:latest DPS_DEFAULT_VOLUME_SIZE=10G
+docker plugin set dps:latest DPS_DEFAULT_VOLUME_SIZE=5G
 docker plugin set dps:latest DPS_DEFAULT_VOLUME_INODES=200000
 docker plugin set dps:latest DPS_ARCHIVE_POLICY=offline
 docker plugin enable dps:latest
@@ -271,7 +271,7 @@ volumes:
   pgdata:
     driver: dps:latest
     driver_opts:
-      size: 20G
+      size: 5G
       inodes: "500000"
 ```
 
