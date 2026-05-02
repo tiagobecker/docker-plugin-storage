@@ -85,6 +85,19 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 sudo bash reset-dps-host.sh
 ```
 
+If Dokploy shows only `Error starting compose`, collect host diagnostics:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o diagnose-dokploy-dps.sh
+sudo bash diagnose-dokploy-dps.sh
+```
+
+To include a small create/mount/remove test of the DPS driver:
+
+```sh
+sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash diagnose-dokploy-dps.sh
+```
+
 ## Host Service
 
 Build:

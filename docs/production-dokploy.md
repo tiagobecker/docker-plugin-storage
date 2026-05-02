@@ -162,6 +162,30 @@ docker volume ls
 docker volume rm <old-volume>
 ```
 
+## Diagnose Deploy Failures
+
+When Dokploy only reports `Error starting compose`, first separate the failure:
+
+- Docker daemon unhealthy;
+- Dokploy/Swarm failing before the volume is created;
+- existing Docker volume still using the `local` driver;
+- DPS service/socket/mount failure.
+
+Run the diagnostic script on the Docker host:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o diagnose-dokploy-dps.sh
+sudo bash diagnose-dokploy-dps.sh
+```
+
+Optional DPS driver test:
+
+```sh
+sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash diagnose-dokploy-dps.sh
+```
+
+If a previously deployed app created the volume without DPS, `docker volume inspect <real-volume-name>` will show `"Driver": "local"`. Docker will not convert that volume to `dps`; remove the stopped app/service and the old volume, then redeploy.
+
 ## Resize
 
 Resize is offline. Stop the app in Dokploy first.
