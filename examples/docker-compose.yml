@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: example
+    storage_opt:
+      size: 12G
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  worker:
+    image: alpine:3.22
+    command: ["sh", "-c", "while true; do date >> /data/ticks.log; sleep 5; done"]
+    volumes:
+      - appdata:/data
+
+volumes:
+  pgdata:
+    driver: dps
+    driver_opts:
+      size: 50g
+      inodes: "1000000"
+
+  appdata:
+    driver: dps
+    driver_opts:
+      size: 5g
+      inodes: "200000"
+

@@ -1,0 +1,6 @@
+/.gocache/
+/.runtime/
+/bin/
+/packaging/docker-plugin/rootfs/
+.DS_Store
+
