@@ -37,6 +37,20 @@ Defaults:
 - `DPS_DEFAULT_VOLUME_INODES=200000`
 - `DPS_ARCHIVE_POLICY=offline`
 
+The installer is intentionally conservative:
+
+- it refuses to run if a managed Docker plugin named like `dps` already exists;
+- it removes stale unmanaged DPS `.spec` files;
+- it removes a stale DPS socket before starting `dpsd`;
+- it creates and mounts a small DPS test volume before reporting success;
+- it stops/removes the `dpsd` systemd unit and socket if that test fails.
+
+If the conflict check is intentionally too strict:
+
+```sh
+sudo env DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT=true bash install-dps.sh
+```
+
 To place volume data on a different mounted disk or directory, set `DPS_IMAGE_ROOT`:
 
 ```sh
@@ -265,6 +279,12 @@ sudo docker plugin set dps:latest DPS_DEFAULT_VOLUME_INODES=200000
 sudo docker plugin set dps:latest DPS_ARCHIVE_POLICY=offline
 sudo docker plugin enable dps:latest
 ```
+
+The managed plugin package requests `CAP_SYS_ADMIN` and loop device access. It
+declares `/dev/loop-control` and `/dev/loop0` through `/dev/loop7`, which is
+needed for Docker Desktop managed plugin tests. For production Dokploy hosts,
+the unmanaged systemd service remains the recommended path because it uses the
+host device namespace directly.
 
 Compose can then use:
 

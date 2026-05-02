@@ -100,6 +100,62 @@
     "capabilities": [
       "CAP_SYS_ADMIN"
     ],
-    "allowAllDevices": true
+    "allowAllDevices": true,
+    "devices": [
+      {
+        "name": "loop-control",
+        "description": "Loop device control node used to attach volume image files",
+        "path": "/dev/loop-control",
+        "settable": []
+      },
+      {
+        "name": "loop0",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop0",
+        "settable": []
+      },
+      {
+        "name": "loop1",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop1",
+        "settable": []
+      },
+      {
+        "name": "loop2",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop2",
+        "settable": []
+      },
+      {
+        "name": "loop3",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop3",
+        "settable": []
+      },
+      {
+        "name": "loop4",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop4",
+        "settable": []
+      },
+      {
+        "name": "loop5",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop5",
+        "settable": []
+      },
+      {
+        "name": "loop6",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop6",
+        "settable": []
+      },
+      {
+        "name": "loop7",
+        "description": "Loop block device for image-backed volumes",
+        "path": "/dev/loop7",
+        "settable": []
+      }
+    ]
   }
 }

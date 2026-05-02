@@ -69,12 +69,15 @@ sudo bash install-dps.sh
 The installer:
 
 - installs host packages required for image-backed volumes;
+- refuses to continue if an old managed Docker plugin named `dps` is present;
+- removes stale DPS plugin spec files before starting the host service;
 - builds `dpsd` and `dpsctl` for linux/arm64;
 - installs a systemd service named `dpsd`;
 - uses `/var/lib/dps/volume-images` for volume image files by default;
 - uses `/mnt/dps/volumes` for Docker-visible mountpoints;
 - sets default volume limits to `10G` and `200000` inodes;
-- creates a small test volume and runs `df -h` and `df -i`.
+- creates a small test volume and runs `df -h` and `df -i`;
+- rolls back the service/socket if that test volume cannot be created and mounted.
 
 Run it on every Dokploy-managed Docker host that should support `driver: dps`.
 
@@ -273,6 +276,8 @@ volumes:
 ```
 
 The managed plugin requests `CAP_SYS_ADMIN` and device access because loop mounts require privileged kernel operations.
+Its package declares `/dev/loop-control` and `/dev/loop0` through `/dev/loop7`
+explicitly, which is required on Docker Desktop managed plugin tests.
 
 ## Operational Notes
 

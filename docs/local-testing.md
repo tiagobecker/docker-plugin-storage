@@ -11,9 +11,10 @@ DPS uses one local backend: each Docker volume is an ext4 image file mounted thr
 ## Docker Desktop
 
 ```sh
-make plugin-create
-docker plugin enable dps:latest
-docker volume create -d dps --name dps_lab_data -o size=64m -o inodes=1024
+make plugin-rootfs
+docker plugin create dps-test:local packaging/docker-plugin
+docker plugin enable dps-test:local
+docker volume create -d dps-test:local --name dps_lab_data -o size=64m -o inodes=1024
 docker run -d --name dps-lab-vm -v dps_lab_data:/data alpine:3.22 sleep 1d
 docker exec dps-lab-vm df -h /data
 docker exec dps-lab-vm df -i /data
@@ -44,8 +45,7 @@ Clean up:
 ```sh
 docker rm -f dps-lab-vm
 docker volume rm dps_lab_data
-docker plugin disable dps:latest
-docker plugin rm dps:latest
+docker plugin rm -f dps-test:local
 ```
 
 ## Linux VM

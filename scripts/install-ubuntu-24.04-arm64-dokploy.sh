@@ -21,6 +21,9 @@ DPS_SERVICE_NAME="${DPS_SERVICE_NAME:-dpsd}"
 DPS_GO_IMAGE="${DPS_GO_IMAGE:-golang:1.24-alpine}"
 DPS_TARGET_ARCH="${DPS_TARGET_ARCH:-arm64}"
 DPS_ALLOW_UNSUPPORTED_OS="${DPS_ALLOW_UNSUPPORTED_OS:-false}"
+DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT="${DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT:-false}"
+DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS="${DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS:-true}"
+DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE="${DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE:-true}"
 
 log() {
   printf '[dps-install] %s\n' "$*"
@@ -33,6 +36,13 @@ die() {
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+is_true() {
+  case "$1" in
+    true|1|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 as_root() {
@@ -80,6 +90,46 @@ check_docker() {
   docker version >/dev/null || die "Docker is installed but not reachable. Run this script on the Docker host."
 }
 
+check_managed_plugin_conflict() {
+  is_true "$DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT" && return 0
+
+  conflicts="$(
+    docker plugin ls --format '{{.Name}}' 2>/dev/null | while IFS= read -r plugin; do
+      case "$plugin" in
+        dps|dps:*|*/dps|*/dps:*|docker-plugin-storage|docker-plugin-storage:*|*/docker-plugin-storage|*/docker-plugin-storage:*)
+          printf '%s\n' "$plugin"
+          ;;
+      esac
+    done
+  )"
+
+  if [ "$conflicts" != "" ]; then
+    cat >&2 <<EOF
+[dps-install] ERROR: managed Docker plugin conflict detected:
+$conflicts
+
+This installer runs DPS as an unmanaged host service using the driver name "dps".
+Remove old managed DPS plugins first, or set DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT=true if you know this is intentional.
+
+Recommended cleanup on disposable test hosts:
+  curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
+  sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
+EOF
+    exit 1
+  fi
+}
+
+remove_stale_plugin_specs() {
+  is_true "$DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS" || return 0
+
+  log "removing stale unmanaged DPS plugin spec files if present"
+  rm -f \
+    /etc/docker/plugins/dps.spec \
+    /etc/docker/plugins/docker-plugin-storage.spec \
+    /usr/lib/docker/plugins/dps.spec \
+    /usr/lib/docker/plugins/docker-plugin-storage.spec
+}
+
 checkout_source() {
   log "checking out DPS source into $DPS_INSTALL_DIR"
   if [ -d "$DPS_INSTALL_DIR/.git" ]; then
@@ -114,6 +164,7 @@ build_binaries() {
 
 validate_mount_root() {
   mkdir -p "$DPS_ROOT" "$DPS_IMAGE_ROOT" "$DPS_MOUNT_ROOT" "$(dirname "$DPS_SOCKET")"
+  rm -f "$DPS_SOCKET"
   log "DPS will store volume images under $DPS_IMAGE_ROOT and mount volumes under $DPS_MOUNT_ROOT/volumes"
 }
 
@@ -174,9 +225,37 @@ restart_service() {
 test_driver() {
   log "testing Docker volume driver"
   test_volume="dps_install_test_$(date +%s)"
-  docker volume create --driver dps --opt size=64M --opt inodes=4096 "$test_volume" >/dev/null
-  docker run --rm -v "$test_volume:/data" alpine:3.22 sh -ec 'df -h /data; df -i /data'
-  docker volume rm "$test_volume" >/dev/null
+  if ! docker volume create --driver dps --opt size=64M --opt inodes=4096 "$test_volume" >/dev/null; then
+    docker volume rm "$test_volume" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! docker run --rm -v "$test_volume:/data" alpine:3.22 sh -ec 'df -h /data; df -i /data'; then
+    docker volume rm "$test_volume" >/dev/null 2>&1 || true
+    return 1
+  fi
+  docker volume rm "$test_volume" >/dev/null 2>&1 || true
+}
+
+rollback_after_failed_test() {
+  is_true "$DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE" || return 0
+
+  log "rolling back DPS service/socket because the Docker volume test failed"
+  systemctl stop "$DPS_SERVICE_NAME.service" >/dev/null 2>&1 || true
+  systemctl disable "$DPS_SERVICE_NAME.service" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$DPS_SERVICE_NAME.service"
+  rm -f "$DPS_SOCKET"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl reset-failed "$DPS_SERVICE_NAME.service" >/dev/null 2>&1 || true
+}
+
+run_test_driver_or_rollback() {
+  if test_driver; then
+    return 0
+  fi
+
+  journalctl -u "$DPS_SERVICE_NAME.service" --no-pager -n 120 || true
+  rollback_after_failed_test
+  die "DPS service started, but Docker could not create and mount a DPS test volume"
 }
 
 print_next_steps() {
@@ -216,13 +295,15 @@ main() {
   check_arch
   install_packages
   check_docker
+  check_managed_plugin_conflict
+  remove_stale_plugin_specs
   checkout_source
   build_binaries
   validate_mount_root
   write_environment
   write_systemd_service
   restart_service
-  test_driver
+  run_test_driver_or_rollback
   print_next_steps
 }
 
