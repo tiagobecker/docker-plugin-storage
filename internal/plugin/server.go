@@ -99,7 +99,7 @@ func (s *Server) mount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mountResp{Err: err.Error()})
 		return
 	}
-	writeJSON(w, mountResp{Mountpoint: v.Mountpoint})
+	writeJSON(w, mountResp{Mountpoint: s.driver.VolumeDataPath(v)})
 }
 
 func (s *Server) path(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +112,7 @@ func (s *Server) path(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mountResp{Err: os.ErrNotExist.Error()})
 		return
 	}
-	writeJSON(w, mountResp{Mountpoint: v.Mountpoint})
+	writeJSON(w, mountResp{Mountpoint: s.driver.VolumeDataPath(v)})
 }
 
 func (s *Server) unmount(w http.ResponseWriter, r *http.Request) {
@@ -133,14 +133,14 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"Volume": nil, "Err": os.ErrNotExist.Error()})
 		return
 	}
-	writeJSON(w, map[string]any{"Volume": asInfo(v), "Err": ""})
+	writeJSON(w, map[string]any{"Volume": s.asInfo(v), "Err": ""})
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	vols := s.driver.Store.ListVolumes()
 	out := make([]volumeInfo, 0, len(vols))
 	for _, v := range vols {
-		out = append(out, asInfo(v))
+		out = append(out, s.asInfo(v))
 	}
 	writeJSON(w, map[string]any{"Volumes": out, "Err": ""})
 }
@@ -149,15 +149,16 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"Capabilities": map[string]string{"Scope": "local"}})
 }
 
-func asInfo(v *store.Volume) volumeInfo {
+func (s *Server) asInfo(v *store.Volume) volumeInfo {
 	status := map[string]string{
-		"size":       v.Size,
-		"inodes":     v.Inodes,
-		"ref_count":  fmt.Sprintf("%d", v.RefCount),
-		"created_at": v.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		"updated_at": v.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"size":               v.Size,
+		"inodes":             v.Inodes,
+		"ref_count":          fmt.Sprintf("%d", v.RefCount),
+		"backing_mountpoint": v.Mountpoint,
+		"created_at":         v.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"updated_at":         v.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	return volumeInfo{Name: v.Name, Mountpoint: v.Mountpoint, Status: status}
+	return volumeInfo{Name: v.Name, Mountpoint: s.driver.VolumeDataPath(v), Status: status}
 }
 
 func decode(w http.ResponseWriter, r *http.Request, out any) bool {

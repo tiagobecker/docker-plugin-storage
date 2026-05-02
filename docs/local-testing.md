@@ -8,6 +8,10 @@ DPS uses one local backend: each Docker volume is an ext4 image file mounted thr
 - `df -i` inode limit;
 - write failure at the configured limit.
 
+DPS returns the `data` subdirectory inside the mounted image to Docker, not the
+filesystem root. This keeps ext metadata such as `lost+found` away from
+database images that require an empty data directory.
+
 ## Docker Desktop
 
 ```sh

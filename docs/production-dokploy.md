@@ -10,10 +10,14 @@ Dokploy Compose
   -> DPS creates /var/lib/dps/volume-images/<volume>.img
   -> DPS formats it as ext4 with the requested inode count
   -> DPS mounts it at /mnt/dps/volumes/<volume>
-  -> Docker bind-mounts that path into the container
+  -> DPS returns /mnt/dps/volumes/<volume>/data to Docker
+  -> Docker bind-mounts that clean data path into the container
 ```
 
 Dokploy does not need to know about the backing image. It only needs Compose volumes using `driver: dps`.
+The extra `data` subdirectory is intentional: ext filesystems create
+`lost+found` at the filesystem root, and images such as Postgres require an
+empty data directory on first boot.
 
 ## Upgrade Note
 

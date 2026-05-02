@@ -245,6 +245,7 @@ func (d *Driver) Snapshot(volume, name string) (*store.Snapshot, error) {
 	if !ok {
 		return nil, os.ErrNotExist
 	}
+	dataPath := d.VolumeDataPath(v)
 	if name == "" {
 		name = fmt.Sprintf("%s-%s", volume, time.Now().UTC().Format("20060102T150405Z"))
 	}
@@ -256,7 +257,7 @@ func (d *Driver) Snapshot(volume, name string) (*store.Snapshot, error) {
 	var sum string
 	if err := d.withArchiveConsistency(v, "snapshot", name, func() error {
 		var err error
-		bytes, sum, err = archive.CreateTarGzAtomic(v.Mountpoint, dst)
+		bytes, sum, err = archive.CreateTarGzAtomic(dataPath, dst)
 		return err
 	}); err != nil {
 		_ = os.Remove(dst)
@@ -315,13 +316,16 @@ func (d *Driver) Restore(snapshotName, volume string) error {
 	if v.RefCount > 0 {
 		return fmt.Errorf("refusing to restore into mounted volume %s", volume)
 	}
+	if err := d.ensureVolumeBacking(v); err != nil {
+		return err
+	}
 	if err := verifySnapshot(sn); err != nil {
 		return err
 	}
-	if err := safeRemoveContents(v.Mountpoint); err != nil {
+	if err := safeRemoveContents(d.VolumeDataPath(v)); err != nil {
 		return err
 	}
-	return archive.ExtractTarGz(sn.Path, v.Mountpoint)
+	return archive.ExtractTarGz(sn.Path, d.VolumeDataPath(v))
 }
 
 func (d *Driver) Backup(snapshotName, target string) (*backup.Manifest, error) {
@@ -348,7 +352,7 @@ func (d *Driver) BackupVolume(volume, target, snapshotName string) (*backup.Mani
 	err := d.withArchiveConsistency(v, "backup-volume", backupName, func() error {
 		pr, pw := io.Pipe()
 		go func() {
-			pw.CloseWithError(archive.WriteTarGz(v.Mountpoint, pw))
+			pw.CloseWithError(archive.WriteTarGz(d.VolumeDataPath(v), pw))
 		}()
 		var err error
 		manifest, err = backup.PutStream(target, pr, backupName, volume, "tar-stream")
@@ -384,10 +388,13 @@ func (d *Driver) RestoreBackup(target, backupID, volume string) error {
 	if v.RefCount > 0 {
 		return fmt.Errorf("refusing to restore into mounted volume %s", volume)
 	}
-	if err := safeRemoveContents(v.Mountpoint); err != nil {
+	if err := d.ensureVolumeBacking(v); err != nil {
 		return err
 	}
-	return archive.ExtractTarGz(tmp, v.Mountpoint)
+	if err := safeRemoveContents(d.VolumeDataPath(v)); err != nil {
+		return err
+	}
+	return archive.ExtractTarGz(tmp, d.VolumeDataPath(v))
 }
 
 func (d *Driver) volumeRoot() string {
@@ -402,11 +409,29 @@ func (d *Driver) volumeImagePath(name string) string {
 	return filepath.Join(d.ImageRoot, name+".img")
 }
 
+func (d *Driver) VolumeDataPath(v *store.Volume) string {
+	return filepath.Join(v.Mountpoint, "data")
+}
+
 func (d *Driver) ensureVolumeBacking(v *store.Volume) error {
 	if d.DisableImageMount {
-		return os.MkdirAll(v.Mountpoint, 0o700)
+		if err := os.MkdirAll(v.Mountpoint, 0o700); err != nil {
+			return err
+		}
+		return d.prepareVolumeDataDir(v)
 	}
-	return imagefs.Ensure(d.volumeImagePath(v.Name), v.Mountpoint, v.Size, v.Inodes)
+	if err := imagefs.Ensure(d.volumeImagePath(v.Name), v.Mountpoint, v.Size, v.Inodes); err != nil {
+		return err
+	}
+	return d.prepareVolumeDataDir(v)
+}
+
+func (d *Driver) prepareVolumeDataDir(v *store.Volume) error {
+	dataPath := d.VolumeDataPath(v)
+	if err := os.MkdirAll(dataPath, 0o700); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Driver) resizeImageVolume(v *store.Volume, oldSize, oldInodes string) error {
@@ -416,7 +441,7 @@ func (d *Driver) resizeImageVolume(v *store.Volume, oldSize, oldInodes string) e
 	if err := d.ensureVolumeBacking(v); err != nil {
 		return err
 	}
-	if err := d.validateResizeFits(v.Mountpoint, oldSize, oldInodes, v.Size, v.Inodes); err != nil {
+	if err := d.validateResizeFits(d.VolumeDataPath(v), oldSize, oldInodes, v.Size, v.Inodes); err != nil {
 		return err
 	}
 
@@ -443,7 +468,7 @@ func mustRecreateImage(oldSize, oldInodes, newSize, newInodes string) bool {
 
 func (d *Driver) recreateImageVolume(v *store.Volume) error {
 	tmpSnapshot := filepath.Join(d.Root, "tmp", "resize-"+v.Name+"-"+time.Now().UTC().Format("20060102T150405Z")+".tar.gz")
-	if _, err := archive.CreateTarGz(v.Mountpoint, tmpSnapshot); err != nil {
+	if _, err := archive.CreateTarGz(d.VolumeDataPath(v), tmpSnapshot); err != nil {
 		return err
 	}
 	defer os.Remove(tmpSnapshot)
@@ -466,7 +491,13 @@ func (d *Driver) recreateImageVolume(v *store.Volume) error {
 		_ = restoreImageBackup(backupImage, image, v.Mountpoint)
 		return err
 	}
-	if err := archive.ExtractTarGz(tmpSnapshot, v.Mountpoint); err != nil {
+	if err := d.prepareVolumeDataDir(v); err != nil {
+		_ = imagefs.Unmount(v.Mountpoint)
+		_ = os.Remove(image)
+		_ = restoreImageBackup(backupImage, image, v.Mountpoint)
+		return err
+	}
+	if err := archive.ExtractTarGz(tmpSnapshot, d.VolumeDataPath(v)); err != nil {
 		_ = imagefs.Unmount(v.Mountpoint)
 		_ = os.Remove(image)
 		_ = restoreImageBackup(backupImage, image, v.Mountpoint)
@@ -646,7 +677,8 @@ func (d *Driver) runArchiveHook(phase, operation, artifact string, v *store.Volu
 		"DPS_ARCHIVE_POLICY="+d.ArchivePolicy,
 		"DPS_ARCHIVE_ARTIFACT="+artifact,
 		"DPS_VOLUME_NAME="+v.Name,
-		"DPS_VOLUME_MOUNTPOINT="+v.Mountpoint,
+		"DPS_VOLUME_MOUNTPOINT="+d.VolumeDataPath(v),
+		"DPS_VOLUME_BACKING_MOUNTPOINT="+v.Mountpoint,
 		"DPS_VOLUME_REFCOUNT="+strconv.Itoa(v.RefCount),
 	)
 	if err := cmd.Run(); err != nil {

@@ -8,10 +8,13 @@ The core storage model is intentionally simple:
 Docker volume
   -> DPS creates one ext4 filesystem image file
   -> DPS mounts that image through a loop device
-  -> Docker receives the mounted path
+  -> Docker receives a clean data subdirectory inside that mount
 ```
 
 This works on ordinary Linux hosts that boot from ext4, which is the common case for VPS and cloud images. Docker application images do not need XFS or any special filesystem.
+DPS keeps filesystem metadata such as `lost+found` outside the path returned to
+Docker, so first-start database images such as Postgres can initialize into an
+empty data directory.
 
 ## Features
 
@@ -74,7 +77,7 @@ The installer:
 - builds `dpsd` and `dpsctl` for linux/arm64;
 - installs a systemd service named `dpsd`;
 - uses `/var/lib/dps/volume-images` for volume image files by default;
-- uses `/mnt/dps/volumes` for Docker-visible mountpoints;
+- uses `/mnt/dps/volumes/<volume>/data` for Docker-visible mountpoints;
 - sets default volume limits to `5G` and `200000` inodes;
 - creates a small test volume and runs `df -h` and `df -i`;
 - rolls back the service/socket if that test volume cannot be created and mounted.

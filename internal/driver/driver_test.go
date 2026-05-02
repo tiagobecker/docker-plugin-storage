@@ -31,7 +31,7 @@ func TestSnapshotAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(v.Mountpoint, "file.txt"), []byte("before"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(d.VolumeDataPath(v), "file.txt"), []byte("before"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sn, err := d.Snapshot("data", "snap1")
@@ -41,18 +41,53 @@ func TestSnapshotAndRestore(t *testing.T) {
 	if sn.SHA256 == "" || sn.ManifestPath == "" {
 		t.Fatalf("snapshot should have checksum and manifest: %+v", sn)
 	}
-	if err := os.WriteFile(filepath.Join(v.Mountpoint, "file.txt"), []byte("after"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(d.VolumeDataPath(v), "file.txt"), []byte("after"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Restore(sn.Name, ""); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(v.Mountpoint, "file.txt"))
+	b, err := os.ReadFile(filepath.Join(d.VolumeDataPath(v), "file.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(b) != "before" {
 		t.Fatalf("restore mismatch: %q", string(b))
+	}
+}
+
+func TestVolumeDataPathIsCleanSubdirectory(t *testing.T) {
+	d := newTestDriver(t, Options{})
+
+	v, err := d.Create("data", map[string]string{"size": "1g", "inodes": "1000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.VolumeDataPath(v) != filepath.Join(v.Mountpoint, "data") {
+		t.Fatalf("unexpected data path: %s", d.VolumeDataPath(v))
+	}
+	if err := os.WriteFile(filepath.Join(v.Mountpoint, "lost+found"), []byte("fs metadata"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d.VolumeDataPath(v), "file.txt"), []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sn, err := d.Snapshot("data", "snap1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, err := d.Create("restore", map[string]string{"size": "1g", "inodes": "1000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Restore(sn.Name, restore.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(d.VolumeDataPath(restore), "file.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(d.VolumeDataPath(restore), "lost+found")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("snapshot should not include filesystem root metadata, stat err=%v", err)
 	}
 }
 
@@ -63,7 +98,7 @@ func TestCorruptSnapshotRestoreIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(v.Mountpoint, "file.txt"), []byte("before"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(d.VolumeDataPath(v), "file.txt"), []byte("before"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sn, err := d.Snapshot("data", "snap1")
@@ -85,7 +120,7 @@ func TestMountedRestoreIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(v.Mountpoint, "file.txt"), []byte("before"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(d.VolumeDataPath(v), "file.txt"), []byte("before"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sn, err := d.Snapshot("data", "snap1")
