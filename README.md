@@ -78,6 +78,13 @@ The installer:
 
 Run it on every Dokploy-managed Docker host that should support `driver: dps`.
 
+For a disposable test host that previously ran an older DPS build, reset first:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/reset-dps-host.sh -o reset-dps-host.sh
+sudo bash reset-dps-host.sh
+```
+
 ## Host Service
 
 Build:

@@ -124,22 +124,38 @@ Filesystem     Inodes IUsed IFree IUse% Mounted on
 
 Only use this on a disposable test host where DPS volumes can be lost.
 
-Stop Dokploy apps that use DPS volumes, then:
+Stop Dokploy apps that use DPS volumes, remove old test volumes from Docker when possible, then run:
 
 ```sh
-sudo systemctl stop dpsd || true
-sudo umount /mnt/dps/volumes/* 2>/dev/null || true
-sudo rm -rf /var/lib/dps
-sudo rm -rf /mnt/dps
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/reset-dps-host.sh -o reset-dps-host.sh
+sudo bash reset-dps-host.sh
 ```
+
+For non-interactive use:
+
+```sh
+sudo env DPS_RESET_CONFIRM=erase-dps bash reset-dps-host.sh
+```
+
+The reset script removes:
+
+- `dpsd` systemd service;
+- `/etc/dps`;
+- `/usr/local/bin/dpsd` and `/usr/local/bin/dpsctl`;
+- `/run/docker/plugins/dps.sock`;
+- `/etc/docker/plugins/dps.spec`;
+- `/var/lib/dps`;
+- `/mnt/dps`;
+- `/opt/docker-plugin-storage`.
 
 Reinstall:
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
 sudo bash install-dps.sh
 ```
 
-Docker volume metadata may still list old volumes. Remove test volumes from Docker before redeploying:
+Docker volume metadata may still list old DPS volumes. Remove them before redeploying:
 
 ```sh
 docker volume ls
