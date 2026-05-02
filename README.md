@@ -57,6 +57,13 @@ volumes:
       inodes: "1000000"
 ```
 
+For Ubuntu 24.04 arm64 servers managed by Dokploy, DPS includes a host-service installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
+sudo bash install-dps.sh
+```
+
 For a production-like Linux/Dokploy setup with a dedicated XFS mount, see [docs/production-dokploy.md](docs/production-dokploy.md).
 
 ## Host CLI

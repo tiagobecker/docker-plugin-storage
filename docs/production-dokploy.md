@@ -14,7 +14,45 @@ Linux host
 
 Dokploy does not need to know about XFS. Dokploy sends Compose definitions to Docker; Docker calls the DPS volume driver; DPS stores and limits the volumes under the XFS mount.
 
-## 1. Prepare XFS
+## 1. Quick Installer For Ubuntu 24.04 arm64
+
+For Ubuntu 24.04 on Ampere/AArch64 with Docker already installed by Dokploy, use the installer below on each Docker host where Dokploy will deploy apps:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
+sudo bash install-dps.sh
+```
+
+Default behavior:
+
+- Installs `dpsd` and `dpsctl` into `/usr/local/bin`.
+- Runs DPS as a host systemd service named `dpsd`.
+- Uses `DPS_POOL_MODE=auto`, so ordinary ext4 hosts can run through the loopback XFS fallback.
+- Sets default volume limits to `10G` and `200000` inodes.
+- Requires limits by default with `DPS_REQUIRE_LIMITS=true`.
+
+For the recommended production-like XFS path, prepare `/mnt/dps` first using the next section, then run:
+
+```sh
+sudo env \
+  DPS_POOL_MODE=direct \
+  DPS_MOUNT_ROOT=/mnt/dps \
+  DPS_DEFAULT_VOLUME_SIZE=10G \
+  DPS_DEFAULT_VOLUME_INODES=200000 \
+  bash install-dps.sh
+```
+
+For a different mount location:
+
+```sh
+sudo env DPS_POOL_MODE=direct DPS_MOUNT_ROOT=/srv/dps bash install-dps.sh
+```
+
+The installer is non-destructive: it does not format disks and refuses `DPS_POOL_MODE=direct` unless the mountpoint already is XFS with `prjquota` or `pquota`.
+
+Run the script on every Dokploy-managed Docker server that should support `driver: dps`.
+
+## 2. Prepare XFS
 
 Use a dedicated block device when possible. The example below uses `/dev/vdb`.
 
@@ -38,9 +76,9 @@ findmnt -no SOURCE,FSTYPE,OPTIONS /mnt/dps
 
 The output must show `xfs` and `prjquota` or `pquota`.
 
-## 2. Install DPS As A Host Plugin
+## 3. Manual Host Plugin Install
 
-Build on the server:
+The quick installer above is the recommended path for Ubuntu 24.04 arm64. For manual installs, build on the server:
 
 ```sh
 git clone https://github.com/<owner>/docker-plugin-storage.git /opt/dps
@@ -85,7 +123,7 @@ sudo systemctl enable --now dpsd
 sudo systemctl status dpsd
 ```
 
-## 3. Validate Docker Volume Limits
+## 4. Validate Docker Volume Limits
 
 Create a small test volume:
 
@@ -113,7 +151,7 @@ docker run --rm -v dps_test:/data alpine:3.22 \
 
 Expected result: the write fails near the configured limit with `No space left on device`.
 
-## 4. Use DPS In Dokploy Compose
+## 5. Use DPS In Dokploy Compose
 
 Dokploy templates must declare DPS as the volume driver. A plain Compose volume such as `pgdata:` uses Docker's default local driver, not DPS.
 
@@ -160,7 +198,7 @@ docker volume ls | grep pgdata
 docker volume inspect <real-volume-name>
 ```
 
-## 5. Managed Plugin Alternative
+## 6. Managed Plugin Alternative
 
 The managed Docker plugin path is useful for local tests and environments where you want Docker to own the plugin lifecycle.
 
@@ -191,7 +229,7 @@ volumes:
 
 For production-like XFS tests, prefer the host service mode above. It points directly at the host XFS mount and avoids the additional constraints of Docker managed plugin propagation.
 
-## 6. Snapshot And Backup Policy
+## 7. Snapshot And Backup Policy
 
 For databases, start with `--archive-policy offline`: stop the app in Dokploy, snapshot or backup, then start it again.
 
