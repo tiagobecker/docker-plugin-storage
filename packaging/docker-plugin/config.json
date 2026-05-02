@@ -1,13 +1,13 @@
 {
-  "description": "DPS quota-aware local volume driver with snapshots and S3-compatible backup",
-  "documentation": "https://github.com/devpower/dps",
+  "description": "DPS portable local volume driver with size/inode limits, snapshots, and S3-compatible backup",
+  "documentation": "https://github.com/tiagobecker/docker-plugin-storage",
   "entrypoint": [
     "/usr/local/bin/dpsd"
   ],
   "env": [
     {
       "name": "DPS_ROOT",
-      "description": "DPS metadata, snapshots, pool image, and fixed volume images",
+      "description": "DPS metadata, snapshots, and default volume image storage",
       "value": "/mnt/dps/.state",
       "settable": [
         "value"
@@ -22,33 +22,9 @@
       ]
     },
     {
-      "name": "DPS_POOL_MODE",
-      "description": "Pool mode: auto, loop, direct, or none",
-      "value": "auto",
-      "settable": [
-        "value"
-      ]
-    },
-    {
-      "name": "DPS_POOL_ROOT",
-      "description": "Mounted pool root; defaults to <mount-root>/pool",
+      "name": "DPS_IMAGE_ROOT",
+      "description": "Volume image file storage; defaults to <DPS_ROOT>/volume-images",
       "value": "",
-      "settable": [
-        "value"
-      ]
-    },
-    {
-      "name": "DPS_POOL_IMAGE",
-      "description": "Loopback pool image path; defaults to <root>/pool.img",
-      "value": "",
-      "settable": [
-        "value"
-      ]
-    },
-    {
-      "name": "DPS_POOL_SIZE",
-      "description": "Loopback pool image size",
-      "value": "20G",
       "settable": [
         "value"
       ]
@@ -56,7 +32,7 @@
     {
       "name": "DPS_DEFAULT_VOLUME_SIZE",
       "description": "Default per-volume size when driver_opts.size is omitted",
-      "value": "",
+      "value": "10G",
       "settable": [
         "value"
       ]
@@ -64,23 +40,7 @@
     {
       "name": "DPS_DEFAULT_VOLUME_INODES",
       "description": "Default per-volume inode limit when driver_opts.inodes is omitted",
-      "value": "",
-      "settable": [
-        "value"
-      ]
-    },
-    {
-      "name": "DPS_REQUIRE_LIMITS",
-      "description": "Reject volume creation unless size is provided by driver_opts or DPS_DEFAULT_VOLUME_SIZE",
-      "value": "false",
-      "settable": [
-        "value"
-      ]
-    },
-    {
-      "name": "DPS_ALLOW_MOUNTED_ARCHIVES",
-      "description": "Deprecated compatibility flag: maps empty DPS_ARCHIVE_POLICY to crash-consistent",
-      "value": "false",
+      "value": "200000",
       "settable": [
         "value"
       ]

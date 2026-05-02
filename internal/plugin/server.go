@@ -3,11 +3,11 @@ package plugin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 
 	"github.com/devpower/dps/internal/driver"
 	"github.com/devpower/dps/internal/store"
@@ -151,10 +151,9 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 
 func asInfo(v *store.Volume) volumeInfo {
 	status := map[string]string{
-		"project_id": strconv.FormatUint(uint64(v.ProjectID), 10),
 		"size":       v.Size,
 		"inodes":     v.Inodes,
-		"ref_count":  strconv.Itoa(v.RefCount),
+		"ref_count":  fmt.Sprintf("%d", v.RefCount),
 		"created_at": v.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		"updated_at": v.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}

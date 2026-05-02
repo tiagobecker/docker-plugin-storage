@@ -16,7 +16,6 @@ type Volume struct {
 	Name       string            `json:"name"`
 	Mountpoint string            `json:"mountpoint"`
 	Opts       map[string]string `json:"opts,omitempty"`
-	ProjectID  uint32            `json:"project_id,omitempty"`
 	Size       string            `json:"size,omitempty"`
 	Inodes     string            `json:"inodes,omitempty"`
 	RefCount   int               `json:"ref_count"`
@@ -36,9 +35,8 @@ type Snapshot struct {
 }
 
 type Database struct {
-	NextProjectID uint32               `json:"next_project_id"`
-	Volumes       map[string]*Volume   `json:"volumes"`
-	Snapshots     map[string]*Snapshot `json:"snapshots"`
+	Volumes   map[string]*Volume   `json:"volumes"`
+	Snapshots map[string]*Snapshot `json:"snapshots"`
 }
 
 type Store struct {
@@ -66,9 +64,8 @@ func (s *Store) load() error {
 
 func (s *Store) loadLocked() error {
 	s.db = Database{
-		NextProjectID: 200000,
-		Volumes:       map[string]*Volume{},
-		Snapshots:     map[string]*Snapshot{},
+		Volumes:   map[string]*Volume{},
+		Snapshots: map[string]*Snapshot{},
 	}
 
 	b, err := os.ReadFile(s.path)
@@ -89,9 +86,6 @@ func (s *Store) loadLocked() error {
 	}
 	if s.db.Snapshots == nil {
 		s.db.Snapshots = map[string]*Snapshot{}
-	}
-	if s.db.NextProjectID == 0 {
-		s.db.NextProjectID = 200000
 	}
 	return nil
 }
@@ -129,13 +123,11 @@ func (s *Store) CreateVolume(name, mountpoint string, opts map[string]string) (*
 			Name:       name,
 			Mountpoint: mountpoint,
 			Opts:       cloneMap(opts),
-			ProjectID:  s.db.NextProjectID,
-			Size:       firstNonEmpty(opts["size"], opts["quota"], opts["bhard"]),
-			Inodes:     firstNonEmpty(opts["inodes"], opts["ihard"]),
+			Size:       opts["size"],
+			Inodes:     opts["inodes"],
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
-		s.db.NextProjectID++
 		s.db.Volumes[name] = v
 		if err := s.saveLocked(); err != nil {
 			return err
@@ -258,15 +250,6 @@ func cloneMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func (s *Store) withFileLock(fn func() error) error {

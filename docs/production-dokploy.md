@@ -1,170 +1,67 @@
-# Production-Like Dokploy Setup
+# Dokploy Setup
 
-This guide describes the recommended way to test DPS on a real Linux cloud server running Docker and Dokploy.
+This guide describes the DPS path for real Dokploy-managed Linux servers.
 
-The storage decision is made on the Docker host, not inside application images. Most cloud Ubuntu images use an ext4 root disk. In that common case DPS should run in `auto` mode and create its own XFS loopback pool. That is the universal path.
-
-The preferred high-I/O production setup, when the host has storage prepared for it, is:
+DPS now has one storage model: every Docker volume is backed by its own ext4 filesystem image and mounted through a loop device. This is the expected path on ordinary Ubuntu cloud images, including hosts where the root filesystem is ext4.
 
 ```text
-Linux host
-  dedicated XFS disk or partition mounted at /mnt/dps with prjquota
-  dpsd running as a host service
-  Docker using the dps volume driver socket
-  Dokploy deploying Compose files that declare driver: dps
+Dokploy Compose
+  -> Docker creates volume with driver: dps
+  -> DPS creates /var/lib/dps/volume-images/<volume>.img
+  -> DPS formats it as ext4 with the requested inode count
+  -> DPS mounts it at /mnt/dps/volumes/<volume>
+  -> Docker bind-mounts that path into the container
 ```
 
-Dokploy does not need to know about XFS. Dokploy sends Compose definitions to Docker; Docker calls the DPS volume driver; DPS stores and limits the volumes under the selected DPS backing store.
+Dokploy does not need to know about the backing image. It only needs Compose volumes using `driver: dps`.
 
-## 1. Quick Installer For Ubuntu 24.04 arm64
+## Upgrade Note
 
-For Ubuntu 24.04 on Ampere/AArch64 with Docker already installed by Dokploy, use the installer below on each Docker host where Dokploy will deploy apps:
+If this host used an earlier DPS build with multiple storage backends, treat this version as a storage-layout change. For disposable test hosts, remove old DPS volumes and state before redeploying. For data that matters, back up first, create fresh DPS volumes with this version, and restore into them.
+
+## Install On Ubuntu 24.04 arm64
+
+Run this on each Docker host managed by Dokploy:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
 sudo bash install-dps.sh
 ```
 
-Default behavior:
+Defaults:
 
-- Installs `dpsd` and `dpsctl` into `/usr/local/bin`.
-- Runs DPS as a host systemd service named `dpsd`.
-- Uses `DPS_POOL_MODE=auto`, so ordinary ext4 hosts run through the loopback XFS compatibility path.
-- Sets default volume limits to `10G` and `200000` inodes.
-- Requires limits by default with `DPS_REQUIRE_LIMITS=true`.
+- `DPS_ROOT=/var/lib/dps`
+- `DPS_IMAGE_ROOT=/var/lib/dps/volume-images`
+- `DPS_MOUNT_ROOT=/mnt/dps`
+- `DPS_DEFAULT_VOLUME_SIZE=10G`
+- `DPS_DEFAULT_VOLUME_INODES=200000`
+- `DPS_ARCHIVE_POLICY=offline`
 
-This is expected on most single-disk cloud images:
-
-```sh
-/dev/loopX xfs ... /mnt/dps/pool
-```
-
-It means DPS is using an XFS filesystem image on top of the host filesystem. Containers still see the configured `df -h`, `df -i`, and `ENOSPC` limits.
-
-For direct XFS mode, prepare `/mnt/dps` manually using a real block device, LVM logical volume, or existing XFS partition, then run:
+To place volume data on a different mounted disk or directory, set `DPS_IMAGE_ROOT`:
 
 ```sh
-sudo env \
-  DPS_POOL_MODE=direct \
-  DPS_MOUNT_ROOT=/mnt/dps \
-  bash install-dps.sh
+sudo env DPS_IMAGE_ROOT=/srv/dps-images bash install-dps.sh
 ```
 
-For a different mount location:
+Use a location backed by enough local storage. DPS does not format disks or create partitions.
+
+## Validate The Service
 
 ```sh
-sudo env \
-  DPS_POOL_MODE=direct \
-  DPS_MOUNT_ROOT=/srv/dps \
-  bash install-dps.sh
+systemctl status dpsd
+journalctl -u dpsd -n 100 --no-pager
+cat /etc/dps/dpsd.env
 ```
 
-The installer refuses `DPS_POOL_MODE=direct` unless the mountpoint is already XFS with `prjquota` or `pquota`. It does not partition or format disks.
+Expected config shape:
 
-Run the script on every Dokploy-managed Docker server that should support `driver: dps`.
-
-## 2. Prepare XFS
-
-This manual path is useful only when the server has a dedicated block device, LVM logical volume, or spare partition. The example below uses `/dev/vdb`.
-
-Warning: `mkfs.xfs` erases the target device.
-
-```sh
-lsblk -f
-
-sudo apt-get update
-sudo apt-get install -y xfsprogs
-
-sudo mkfs.xfs -f /dev/vdb
-sudo mkdir -p /mnt/dps
-
-UUID=$(sudo blkid -s UUID -o value /dev/vdb)
-echo "UUID=$UUID /mnt/dps xfs defaults,prjquota 0 2" | sudo tee -a /etc/fstab
-
-sudo mount -a
-findmnt -no SOURCE,FSTYPE,OPTIONS /mnt/dps
+```text
+DPS_ROOT=/var/lib/dps
+DPS_MOUNT_ROOT=/mnt/dps
+DPS_IMAGE_ROOT=/var/lib/dps/volume-images
 ```
 
-The output must show `xfs` and `prjquota` or `pquota`.
-
-## 3. Manual Host Plugin Install
-
-The quick installer above is the recommended path for Ubuntu 24.04 arm64. For manual installs, build on the server:
-
-```sh
-git clone https://github.com/<owner>/docker-plugin-storage.git /opt/dps
-cd /opt/dps
-
-make build
-
-sudo install -m 0755 bin/dpsd /usr/local/bin/dpsd
-sudo install -m 0755 bin/dpsctl /usr/local/bin/dpsctl
-```
-
-Create the systemd service:
-
-```sh
-sudo tee /etc/systemd/system/dpsd.service >/dev/null <<'EOF'
-[Unit]
-Description=DPS Docker Volume Driver
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/dpsd \
-  --root /var/lib/dps \
-  --mount-root /mnt/dps \
-  --pool-mode direct \
-  --default-volume-size 10G \
-  --default-volume-inodes 200000 \
-  --require-limits \
-  --archive-policy offline \
-  --socket /run/docker/plugins/dps.sock
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo mkdir -p /var/lib/dps /run/docker/plugins
-sudo systemctl daemon-reload
-sudo systemctl enable --now dpsd
-sudo systemctl status dpsd
-```
-
-## 4. Validate Docker Volume Limits
-
-Create a small test volume:
-
-```sh
-docker volume create \
-  --driver dps \
-  --opt size=1G \
-  --opt inodes=50000 \
-  dps_test
-```
-
-Check visible limits from inside a container:
-
-```sh
-docker run --rm -v dps_test:/data alpine:3.22 df -h /data
-docker run --rm -v dps_test:/data alpine:3.22 df -i /data
-```
-
-Write past the limit:
-
-```sh
-docker run --rm -v dps_test:/data alpine:3.22 \
-  sh -c 'dd if=/dev/zero of=/data/blob bs=1M count=1200 status=progress'
-```
-
-Expected result: the write fails near the configured limit with `No space left on device`.
-
-## 5. Use DPS In Dokploy Compose
-
-Dokploy templates must declare DPS as the volume driver. A plain Compose volume such as `pgdata:` uses Docker's default local driver, not DPS.
+## Use DPS In Dokploy Compose
 
 Example:
 
@@ -186,15 +83,24 @@ volumes:
       inodes: "500000"
 ```
 
-If DPS runs with defaults and `--require-limits`, the template can omit `driver_opts` only when the global defaults are acceptable:
+If the global defaults are acceptable, the volume may omit `driver_opts`:
 
 ```yaml
 volumes:
-  pgdata:
+  appdata:
     driver: dps
 ```
 
-After deployment, validate the actual container path:
+## Validate Limits
+
+Dokploy or Compose may prefix the real volume name with the project/app name.
+
+```sh
+docker volume ls | grep pgdata
+docker volume inspect <real-volume-name>
+```
+
+Check the mounted path inside the container:
 
 ```sh
 docker ps
@@ -202,27 +108,80 @@ docker exec -it <container> df -h /var/lib/postgresql/data
 docker exec -it <container> df -i /var/lib/postgresql/data
 ```
 
-Dokploy or Compose may prefix the real volume name with the project/app name. Inspect it with:
+Expected shape:
 
-```sh
-docker volume ls | grep pgdata
-docker volume inspect <real-volume-name>
+```text
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/loopX       20G  ...   ...   ... /var/lib/postgresql/data
+
+Filesystem     Inodes IUsed IFree IUse% Mounted on
+/dev/loopX      500000 ...   ...   ... /var/lib/postgresql/data
 ```
 
-## 6. Managed Plugin Alternative
+`/dev/loopX` is correct. It means DPS mounted the per-volume filesystem image.
 
-The managed Docker plugin path is useful for local tests and environments where you want Docker to own the plugin lifecycle.
+## Reset A Test Host
+
+Only use this on a disposable test host where DPS volumes can be lost.
+
+Stop Dokploy apps that use DPS volumes, then:
 
 ```sh
-cd /opt/dps
-make plugin-rootfs
+sudo systemctl stop dpsd || true
+sudo umount /mnt/dps/volumes/* 2>/dev/null || true
+sudo rm -rf /var/lib/dps
+sudo rm -rf /mnt/dps
+```
 
+Reinstall:
+
+```sh
+sudo bash install-dps.sh
+```
+
+Docker volume metadata may still list old volumes. Remove test volumes from Docker before redeploying:
+
+```sh
+docker volume ls
+docker volume rm <old-volume>
+```
+
+## Resize
+
+Resize is offline. Stop the app in Dokploy first.
+
+```sh
+dpsctl resize <volume> 40G 800000
+```
+
+Increasing size grows the ext4 image when possible. Shrinking size or changing inode count recreates the image and restores data after checking that current usage fits with 10% headroom.
+
+## Snapshots And Backups
+
+Default policy is `offline`, so snapshot and `backup-volume` are refused while the volume is mounted by Docker.
+
+```sh
+dpsctl snapshot pgdata before-upgrade
+dpsctl backup before-upgrade /srv/dps-backups
+dpsctl backup-volume pgdata s3://bucket/prod pgdata-manual
+```
+
+For databases, stop writes or use tested hooks:
+
+```sh
+dpsctl --archive-policy hooked \
+  --pre-archive-hook '/etc/dps/hooks/postgres-pre.sh' \
+  --post-archive-hook '/etc/dps/hooks/postgres-post.sh' \
+  backup-volume pgdata s3://bucket/prod pgdata-hooked
+```
+
+## Managed Plugin Alternative
+
+```sh
+make plugin-rootfs
 sudo docker plugin create dps:latest packaging/docker-plugin
-sudo docker plugin set dps:latest DPS_POOL_MODE=auto
-sudo docker plugin set dps:latest DPS_POOL_SIZE=100G
 sudo docker plugin set dps:latest DPS_DEFAULT_VOLUME_SIZE=10G
 sudo docker plugin set dps:latest DPS_DEFAULT_VOLUME_INODES=200000
-sudo docker plugin set dps:latest DPS_REQUIRE_LIMITS=true
 sudo docker plugin set dps:latest DPS_ARCHIVE_POLICY=offline
 sudo docker plugin enable dps:latest
 ```
@@ -237,22 +196,3 @@ volumes:
       size: 20G
       inodes: "500000"
 ```
-
-For production-like XFS tests, prefer the host service mode above. It points directly at the host XFS mount and avoids the additional constraints of Docker managed plugin propagation.
-
-## 7. Snapshot And Backup Policy
-
-For databases, start with `--archive-policy offline`: stop the app in Dokploy, snapshot or backup, then start it again.
-
-Mounted-volume capture requires an explicit policy:
-
-```sh
-dpsctl --archive-policy crash-consistent snapshot pgdata snap1
-
-dpsctl --archive-policy hooked \
-  --pre-archive-hook '/etc/dps/hooks/postgres-pre.sh' \
-  --post-archive-hook '/etc/dps/hooks/postgres-post.sh' \
-  backup-volume pgdata s3://bucket/prod/postgres
-```
-
-Use `hooked` only after the hook scripts have been tested against the target database.

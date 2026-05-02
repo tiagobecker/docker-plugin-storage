@@ -1,6 +1,6 @@
 /.gocache/
+/.gomodcache/
 /.runtime/
 /bin/
 /packaging/docker-plugin/rootfs/
 .DS_Store
-

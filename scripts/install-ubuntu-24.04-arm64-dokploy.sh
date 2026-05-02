@@ -4,20 +4,17 @@ set -Eeuo pipefail
 # Install DPS as an unmanaged Docker VolumeDriver plugin on Ubuntu 24.04 arm64.
 # Intended for Dokploy-managed Linux servers where Docker is already installed.
 #
-# Default mode is "auto" so the script can install on ordinary ext4 hosts.
-# It does not partition or format disks. If DPS_POOL_MODE=direct is used,
-# DPS_MOUNT_ROOT must already be mounted as XFS with prjquota/pquota.
+# DPS uses one portable backend: one ext4 filesystem image per Docker volume,
+# mounted through a loop device under DPS_MOUNT_ROOT.
 
 DPS_REPO_URL="${DPS_REPO_URL:-https://github.com/tiagobecker/docker-plugin-storage.git}"
 DPS_REF="${DPS_REF:-main}"
 DPS_INSTALL_DIR="${DPS_INSTALL_DIR:-/opt/docker-plugin-storage}"
 DPS_ROOT="${DPS_ROOT:-/var/lib/dps}"
 DPS_MOUNT_ROOT="${DPS_MOUNT_ROOT:-/mnt/dps}"
-DPS_POOL_MODE="${DPS_POOL_MODE:-auto}"
-DPS_POOL_SIZE="${DPS_POOL_SIZE:-100G}"
+DPS_IMAGE_ROOT="${DPS_IMAGE_ROOT:-$DPS_ROOT/volume-images}"
 DPS_DEFAULT_VOLUME_SIZE="${DPS_DEFAULT_VOLUME_SIZE:-10G}"
 DPS_DEFAULT_VOLUME_INODES="${DPS_DEFAULT_VOLUME_INODES:-200000}"
-DPS_REQUIRE_LIMITS="${DPS_REQUIRE_LIMITS:-true}"
 DPS_ARCHIVE_POLICY="${DPS_ARCHIVE_POLICY:-offline}"
 DPS_SOCKET="${DPS_SOCKET:-/run/docker/plugins/dps.sock}"
 DPS_SERVICE_NAME="${DPS_SERVICE_NAME:-dpsd}"
@@ -75,8 +72,7 @@ install_packages() {
     ca-certificates \
     e2fsprogs \
     git \
-    util-linux \
-    xfsprogs
+    util-linux
 }
 
 check_docker() {
@@ -117,20 +113,8 @@ build_binaries() {
 }
 
 validate_mount_root() {
-  mkdir -p "$DPS_ROOT" "$DPS_MOUNT_ROOT" "$(dirname "$DPS_SOCKET")"
-
-  if [ "$DPS_POOL_MODE" = "direct" ]; then
-    mountpoint -q "$DPS_MOUNT_ROOT" || die "DPS_POOL_MODE=direct requires $DPS_MOUNT_ROOT to be a mounted XFS filesystem"
-    fstype="$(findmnt -no FSTYPE "$DPS_MOUNT_ROOT" || true)"
-    opts="$(findmnt -no OPTIONS "$DPS_MOUNT_ROOT" || true)"
-    [ "$fstype" = "xfs" ] || die "DPS_POOL_MODE=direct requires XFS at $DPS_MOUNT_ROOT; got $fstype"
-    case ",$opts," in
-      *,prjquota,*|*,pquota,*) ;;
-      *) die "$DPS_MOUNT_ROOT is XFS but missing prjquota/pquota mount option" ;;
-    esac
-  else
-    log "DPS_POOL_MODE=$DPS_POOL_MODE; DPS may use loopback/fixed-image fallback when project quotas are unavailable"
-  fi
+  mkdir -p "$DPS_ROOT" "$DPS_IMAGE_ROOT" "$DPS_MOUNT_ROOT" "$(dirname "$DPS_SOCKET")"
+  log "DPS will store volume images under $DPS_IMAGE_ROOT and mount volumes under $DPS_MOUNT_ROOT/volumes"
 }
 
 write_environment() {
@@ -139,11 +123,9 @@ write_environment() {
   cat >/etc/dps/dpsd.env <<EOF
 DPS_ROOT=$DPS_ROOT
 DPS_MOUNT_ROOT=$DPS_MOUNT_ROOT
-DPS_POOL_MODE=$DPS_POOL_MODE
-DPS_POOL_SIZE=$DPS_POOL_SIZE
+DPS_IMAGE_ROOT=$DPS_IMAGE_ROOT
 DPS_DEFAULT_VOLUME_SIZE=$DPS_DEFAULT_VOLUME_SIZE
 DPS_DEFAULT_VOLUME_INODES=$DPS_DEFAULT_VOLUME_INODES
-DPS_REQUIRE_LIMITS=$DPS_REQUIRE_LIMITS
 DPS_ARCHIVE_POLICY=$DPS_ARCHIVE_POLICY
 DPS_SOCKET=$DPS_SOCKET
 EOF
@@ -165,11 +147,9 @@ EnvironmentFile=/etc/dps/dpsd.env
 ExecStart=/usr/local/bin/dpsd \
   --root ${DPS_ROOT} \
   --mount-root ${DPS_MOUNT_ROOT} \
-  --pool-mode ${DPS_POOL_MODE} \
-  --pool-size ${DPS_POOL_SIZE} \
+  --image-root ${DPS_IMAGE_ROOT} \
   --default-volume-size ${DPS_DEFAULT_VOLUME_SIZE} \
   --default-volume-inodes ${DPS_DEFAULT_VOLUME_INODES} \
-  --require-limits=${DPS_REQUIRE_LIMITS} \
   --archive-policy ${DPS_ARCHIVE_POLICY} \
   --socket ${DPS_SOCKET}
 Restart=always
@@ -225,7 +205,7 @@ Service logs:
 Current DPS config:
 
   source /etc/dps/dpsd.env
-  printf 'mode=%s mount=%s root=%s\\n' "\$DPS_POOL_MODE" "\$DPS_MOUNT_ROOT" "\$DPS_ROOT"
+  printf 'images=%s mount=%s root=%s\\n' "\$DPS_IMAGE_ROOT" "\$DPS_MOUNT_ROOT" "\$DPS_ROOT"
 
 EOF
 }

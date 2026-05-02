@@ -18,8 +18,7 @@ import (
 
 	"github.com/devpower/dps/internal/archive"
 	"github.com/devpower/dps/internal/backup"
-	"github.com/devpower/dps/internal/pool"
-	"github.com/devpower/dps/internal/quota"
+	"github.com/devpower/dps/internal/imagefs"
 	"github.com/devpower/dps/internal/store"
 )
 
@@ -44,38 +43,30 @@ type snapshotManifest struct {
 }
 
 type Driver struct {
-	Root                 string
-	MountRoot            string
-	PoolRoot             string
-	QuotaRoot            string
-	ProjectQuota         bool
-	DefaultSize          string
-	DefaultInodes        string
-	RequireLimits        bool
-	AllowMountedArchives bool
-	ArchivePolicy        string
-	PreArchiveHook       string
-	PostArchiveHook      string
-	ArchiveHookTimeout   time.Duration
-	Store                *store.Store
-	Quota                quota.Manager
+	Root               string
+	MountRoot          string
+	ImageRoot          string
+	DefaultSize        string
+	DefaultInodes      string
+	ArchivePolicy      string
+	PreArchiveHook     string
+	PostArchiveHook    string
+	ArchiveHookTimeout time.Duration
+	Store              *store.Store
+	DisableImageMount  bool
 }
 
 type Options struct {
-	Root                 string
-	MountRoot            string
-	PoolMode             string
-	PoolRoot             string
-	PoolImage            string
-	PoolSize             string
-	DefaultSize          string
-	DefaultInodes        string
-	RequireLimits        bool
-	AllowMountedArchives bool
-	ArchivePolicy        string
-	PreArchiveHook       string
-	PostArchiveHook      string
-	ArchiveHookTimeout   time.Duration
+	Root               string
+	MountRoot          string
+	ImageRoot          string
+	DefaultSize        string
+	DefaultInodes      string
+	ArchivePolicy      string
+	PreArchiveHook     string
+	PostArchiveHook    string
+	ArchiveHookTimeout time.Duration
+	DisableImageMount  bool
 }
 
 func New(root, mountRoot string) (*Driver, error) {
@@ -84,23 +75,22 @@ func New(root, mountRoot string) (*Driver, error) {
 
 func NewWithOptions(opts Options) (*Driver, error) {
 	root := opts.Root
+	if root == "" {
+		root = "/var/lib/dps"
+	}
 	mountRoot := opts.MountRoot
+	if mountRoot == "" {
+		mountRoot = "/mnt/dps"
+	}
+	imageRoot := opts.ImageRoot
+	if imageRoot == "" {
+		imageRoot = filepath.Join(root, "volume-images")
+	}
 	st, err := store.Open(filepath.Join(root, "metadata.json"))
 	if err != nil {
 		return nil, err
 	}
-	p, err := pool.Ensure(pool.Config{
-		Mode:      opts.PoolMode,
-		Root:      root,
-		MountRoot: mountRoot,
-		PoolRoot:  opts.PoolRoot,
-		ImagePath: opts.PoolImage,
-		ImageSize: opts.PoolSize,
-	})
-	if err != nil {
-		return nil, err
-	}
-	archivePolicy, err := normalizeArchivePolicy(opts.ArchivePolicy, opts.AllowMountedArchives)
+	archivePolicy, err := normalizeArchivePolicy(opts.ArchivePolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -112,23 +102,19 @@ func NewWithOptions(opts Options) (*Driver, error) {
 		return nil, errors.New("archive hook timeout must be positive")
 	}
 	d := &Driver{
-		Root:                 root,
-		MountRoot:            mountRoot,
-		PoolRoot:             p.Root,
-		QuotaRoot:            p.QuotaRoot,
-		ProjectQuota:         p.SupportsProjectQuota,
-		DefaultSize:          opts.DefaultSize,
-		DefaultInodes:        opts.DefaultInodes,
-		RequireLimits:        opts.RequireLimits,
-		AllowMountedArchives: opts.AllowMountedArchives,
-		ArchivePolicy:        archivePolicy,
-		PreArchiveHook:       opts.PreArchiveHook,
-		PostArchiveHook:      opts.PostArchiveHook,
-		ArchiveHookTimeout:   hookTimeout,
-		Store:                st,
-		Quota:                quota.Manager{MountRoot: p.QuotaRoot},
+		Root:               root,
+		MountRoot:          mountRoot,
+		ImageRoot:          imageRoot,
+		DefaultSize:        opts.DefaultSize,
+		DefaultInodes:      opts.DefaultInodes,
+		ArchivePolicy:      archivePolicy,
+		PreArchiveHook:     opts.PreArchiveHook,
+		PostArchiveHook:    opts.PostArchiveHook,
+		ArchiveHookTimeout: hookTimeout,
+		Store:              st,
+		DisableImageMount:  opts.DisableImageMount,
 	}
-	for _, dir := range []string{d.volumeRoot(), d.snapshotRoot()} {
+	for _, dir := range []string{d.volumeRoot(), d.snapshotRoot(), d.ImageRoot} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
@@ -141,7 +127,7 @@ func (d *Driver) Create(name string, opts map[string]string) (*store.Volume, err
 		return nil, err
 	}
 	opts = d.applyDefaultLimits(opts)
-	if err := d.validateLimitPolicy(opts); err != nil {
+	if err := d.validateLimits(opts); err != nil {
 		return nil, err
 	}
 	mp := filepath.Join(d.volumeRoot(), name)
@@ -165,20 +151,17 @@ func (d *Driver) applyDefaultLimits(opts map[string]string) map[string]string {
 	for k, v := range opts {
 		out[k] = v
 	}
-	if firstNonEmpty(out["size"], out["quota"], out["bhard"]) == "" && d.DefaultSize != "" {
+	if out["size"] == "" && d.DefaultSize != "" {
 		out["size"] = d.DefaultSize
 	}
-	if firstNonEmpty(out["inodes"], out["ihard"]) == "" && d.DefaultInodes != "" {
+	if out["inodes"] == "" && d.DefaultInodes != "" {
 		out["inodes"] = d.DefaultInodes
 	}
 	return out
 }
 
-func (d *Driver) validateLimitPolicy(opts map[string]string) error {
-	if !d.RequireLimits {
-		return nil
-	}
-	if firstNonEmpty(opts["size"], opts["quota"], opts["bhard"]) == "" {
+func (d *Driver) validateLimits(opts map[string]string) error {
+	if opts["size"] == "" {
 		return errors.New("volume size limit is required; set driver_opts.size or DPS_DEFAULT_VOLUME_SIZE")
 	}
 	return nil
@@ -192,12 +175,7 @@ func (d *Driver) Remove(name string) error {
 	if v.RefCount > 0 {
 		return fmt.Errorf("volume %s is mounted by %d consumer(s)", name, v.RefCount)
 	}
-	if d.ProjectQuota {
-		if err := d.Quota.Clear(v.ProjectID); err != nil {
-			return err
-		}
-	}
-	if err := pool.Unmount(v.Mountpoint); err != nil {
+	if err := imagefs.Unmount(v.Mountpoint); err != nil {
 		return err
 	}
 	if err := safeRemoveAll(d.volumeRoot(), v.Mountpoint); err != nil {
@@ -253,20 +231,11 @@ func (d *Driver) Resize(name, size, inodes string) error {
 	if inodes != "" {
 		v.Inodes = inodes
 	}
-	if d.ProjectQuota {
-		if err := d.validateResizeFits(v.Mountpoint, oldSize, oldInodes, v.Size, v.Inodes); err != nil {
-			return err
-		}
-		if err := d.Quota.Apply(v.Mountpoint, v.ProjectID, v.Size, v.Inodes); err != nil {
-			return err
-		}
-	} else {
-		if v.RefCount > 0 {
-			return fmt.Errorf("offline resize is required for fixed image volume %s", name)
-		}
-		if err := d.resizeFixedImageVolume(v, oldSize, oldInodes); err != nil {
-			return err
-		}
+	if v.RefCount > 0 {
+		return fmt.Errorf("offline resize is required for volume %s", name)
+	}
+	if err := d.resizeImageVolume(v, oldSize, oldInodes); err != nil {
+		return err
 	}
 	return d.Store.UpdateVolume(v)
 }
@@ -422,10 +391,7 @@ func (d *Driver) RestoreBackup(target, backupID, volume string) error {
 }
 
 func (d *Driver) volumeRoot() string {
-	if d.PoolRoot != "" {
-		return filepath.Join(d.PoolRoot, "volumes")
-	}
-	return filepath.Join(d.Root, "volumes")
+	return filepath.Join(d.MountRoot, "volumes")
 }
 
 func (d *Driver) snapshotRoot() string {
@@ -433,22 +399,19 @@ func (d *Driver) snapshotRoot() string {
 }
 
 func (d *Driver) volumeImagePath(name string) string {
-	return filepath.Join(d.Root, "volume-images", name+".img")
+	return filepath.Join(d.ImageRoot, name+".img")
 }
 
 func (d *Driver) ensureVolumeBacking(v *store.Volume) error {
-	if d.ProjectQuota {
-		return d.Quota.Apply(v.Mountpoint, v.ProjectID, v.Size, v.Inodes)
+	if d.DisableImageMount {
+		return os.MkdirAll(v.Mountpoint, 0o700)
 	}
-	if v.Size == "" {
-		return nil
-	}
-	return pool.EnsureVolumeImage(d.volumeImagePath(v.Name), v.Mountpoint, v.Size, v.Inodes)
+	return imagefs.Ensure(d.volumeImagePath(v.Name), v.Mountpoint, v.Size, v.Inodes)
 }
 
-func (d *Driver) resizeFixedImageVolume(v *store.Volume, oldSize, oldInodes string) error {
+func (d *Driver) resizeImageVolume(v *store.Volume, oldSize, oldInodes string) error {
 	if v.Size == "" {
-		return errors.New("fixed image volume resize requires a size")
+		return errors.New("volume resize requires a size")
 	}
 	if err := d.ensureVolumeBacking(v); err != nil {
 		return err
@@ -457,28 +420,28 @@ func (d *Driver) resizeFixedImageVolume(v *store.Volume, oldSize, oldInodes stri
 		return err
 	}
 
-	recreate := mustRecreateFixedImage(oldSize, oldInodes, v.Size, v.Inodes)
+	recreate := mustRecreateImage(oldSize, oldInodes, v.Size, v.Inodes)
 	if !recreate {
-		if err := pool.GrowVolumeImage(d.volumeImagePath(v.Name), v.Mountpoint, v.Size); err == nil {
+		if err := imagefs.Grow(d.volumeImagePath(v.Name), v.Mountpoint, v.Size); err == nil {
 			return nil
 		}
 	}
-	return d.recreateFixedImageVolume(v)
+	return d.recreateImageVolume(v)
 }
 
-func mustRecreateFixedImage(oldSize, oldInodes, newSize, newInodes string) bool {
+func mustRecreateImage(oldSize, oldInodes, newSize, newInodes string) bool {
 	if newInodes != "" && newInodes != oldInodes {
 		return true
 	}
-	oldBytes, oldErr := pool.ParseSize(oldSize)
-	newBytes, newErr := pool.ParseSize(newSize)
+	oldBytes, oldErr := imagefs.ParseSize(oldSize)
+	newBytes, newErr := imagefs.ParseSize(newSize)
 	if oldErr != nil || newErr != nil {
 		return true
 	}
 	return newBytes < oldBytes
 }
 
-func (d *Driver) recreateFixedImageVolume(v *store.Volume) error {
+func (d *Driver) recreateImageVolume(v *store.Volume) error {
 	tmpSnapshot := filepath.Join(d.Root, "tmp", "resize-"+v.Name+"-"+time.Now().UTC().Format("20060102T150405Z")+".tar.gz")
 	if _, err := archive.CreateTarGz(v.Mountpoint, tmpSnapshot); err != nil {
 		return err
@@ -489,7 +452,7 @@ func (d *Driver) recreateFixedImageVolume(v *store.Volume) error {
 	backupImage := image + ".resize-backup"
 	_ = os.Remove(backupImage)
 
-	if err := pool.Unmount(v.Mountpoint); err != nil {
+	if err := imagefs.Unmount(v.Mountpoint); err != nil {
 		return err
 	}
 	if err := os.Rename(image, backupImage); err != nil && !os.IsNotExist(err) {
@@ -499,12 +462,12 @@ func (d *Driver) recreateFixedImageVolume(v *store.Volume) error {
 		_ = restoreImageBackup(backupImage, image, v.Mountpoint)
 		return err
 	}
-	if err := pool.EnsureVolumeImage(image, v.Mountpoint, v.Size, v.Inodes); err != nil {
+	if err := imagefs.Ensure(image, v.Mountpoint, v.Size, v.Inodes); err != nil {
 		_ = restoreImageBackup(backupImage, image, v.Mountpoint)
 		return err
 	}
 	if err := archive.ExtractTarGz(tmpSnapshot, v.Mountpoint); err != nil {
-		_ = pool.Unmount(v.Mountpoint)
+		_ = imagefs.Unmount(v.Mountpoint)
 		_ = os.Remove(image)
 		_ = restoreImageBackup(backupImage, image, v.Mountpoint)
 		return err
@@ -514,12 +477,12 @@ func (d *Driver) recreateFixedImageVolume(v *store.Volume) error {
 }
 
 func restoreImageBackup(backupImage, image, mountpoint string) error {
-	_ = pool.Unmount(mountpoint)
+	_ = imagefs.Unmount(mountpoint)
 	_ = os.Remove(image)
 	if err := os.Rename(backupImage, image); err != nil {
 		return err
 	}
-	return pool.EnsureVolumeImage(image, mountpoint, "1", "")
+	return imagefs.Ensure(image, mountpoint, "1", "")
 }
 
 func (d *Driver) validateResizeFits(path, oldSize, oldInodes, newSize, newInodes string) error {
@@ -528,7 +491,7 @@ func (d *Driver) validateResizeFits(path, oldSize, oldInodes, newSize, newInodes
 		return err
 	}
 	if newSize != "" && isShrinkSize(oldSize, newSize) {
-		target, err := pool.ParseSize(newSize)
+		target, err := imagefs.ParseSize(newSize)
 		if err != nil {
 			return err
 		}
@@ -578,8 +541,8 @@ func measureUsage(root string) (volumeUsage, error) {
 }
 
 func isShrinkSize(oldSize, newSize string) bool {
-	oldBytes, oldErr := pool.ParseSize(oldSize)
-	newBytes, newErr := pool.ParseSize(newSize)
+	oldBytes, oldErr := imagefs.ParseSize(oldSize)
+	newBytes, newErr := imagefs.ParseSize(newSize)
 	return oldErr == nil && newErr == nil && newBytes < oldBytes
 }
 
@@ -594,15 +557,6 @@ func validateName(name string) error {
 		return fmt.Errorf("invalid name %q", name)
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func safePathToken(value string) string {
@@ -622,12 +576,9 @@ func safePathToken(value string) string {
 	return out
 }
 
-func normalizeArchivePolicy(policy string, allowMountedArchives bool) (string, error) {
+func normalizeArchivePolicy(policy string) (string, error) {
 	policy = strings.ToLower(strings.TrimSpace(policy))
 	if policy == "" {
-		if allowMountedArchives {
-			return ArchivePolicyCrashConsistent, nil
-		}
 		return ArchivePolicyOffline, nil
 	}
 	switch policy {

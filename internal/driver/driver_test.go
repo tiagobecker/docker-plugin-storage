@@ -8,14 +8,24 @@ import (
 	"testing"
 )
 
-func TestSnapshotAndRestore(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := New(root, mountRoot)
+func newTestDriver(t *testing.T, opts Options) *Driver {
+	t.Helper()
+	if opts.Root == "" {
+		opts.Root = filepath.Join(t.TempDir(), "state")
+	}
+	if opts.MountRoot == "" {
+		opts.MountRoot = filepath.Join(t.TempDir(), "mount")
+	}
+	opts.DisableImageMount = true
+	d, err := NewWithOptions(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.Quota.DryRun = true
+	return d
+}
+
+func TestSnapshotAndRestore(t *testing.T) {
+	d := newTestDriver(t, Options{})
 
 	v, err := d.Create("data", map[string]string{"size": "1g", "inodes": "1000"})
 	if err != nil {
@@ -47,13 +57,7 @@ func TestSnapshotAndRestore(t *testing.T) {
 }
 
 func TestCorruptSnapshotRestoreIsRejected(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := New(root, mountRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
+	d := newTestDriver(t, Options{DefaultSize: "1g"})
 
 	v, err := d.Create("data", nil)
 	if err != nil {
@@ -75,13 +79,7 @@ func TestCorruptSnapshotRestoreIsRejected(t *testing.T) {
 }
 
 func TestMountedRestoreIsRejected(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := New(root, mountRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
+	d := newTestDriver(t, Options{DefaultSize: "1g"})
 
 	v, err := d.Create("data", nil)
 	if err != nil {
@@ -103,13 +101,7 @@ func TestMountedRestoreIsRejected(t *testing.T) {
 }
 
 func TestMountedSnapshotIsRejectedByDefault(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := New(root, mountRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
+	d := newTestDriver(t, Options{DefaultSize: "1g"})
 
 	if _, err := d.Create("data", nil); err != nil {
 		t.Fatal(err)
@@ -123,13 +115,7 @@ func TestMountedSnapshotIsRejectedByDefault(t *testing.T) {
 }
 
 func TestMountedBackupVolumeIsRejectedByDefault(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := New(root, mountRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
+	d := newTestDriver(t, Options{DefaultSize: "1g"})
 
 	if _, err := d.Create("data", nil); err != nil {
 		t.Fatal(err)
@@ -143,18 +129,10 @@ func TestMountedBackupVolumeIsRejectedByDefault(t *testing.T) {
 }
 
 func TestCrashConsistentPolicyAllowsMountedSnapshot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := NewWithOptions(Options{
-		Root:          root,
-		MountRoot:     mountRoot,
-		PoolMode:      "none",
+	d := newTestDriver(t, Options{
+		DefaultSize:   "1g",
 		ArchivePolicy: ArchivePolicyCrashConsistent,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
 
 	if _, err := d.Create("data", nil); err != nil {
 		t.Fatal(err)
@@ -168,21 +146,13 @@ func TestCrashConsistentPolicyAllowsMountedSnapshot(t *testing.T) {
 }
 
 func TestHookedPolicyRunsHooksForMountedSnapshot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
 	hookLog := filepath.Join(t.TempDir(), "hooks.log")
-	d, err := NewWithOptions(Options{
-		Root:            root,
-		MountRoot:       mountRoot,
-		PoolMode:        "none",
+	d := newTestDriver(t, Options{
+		DefaultSize:     "1g",
 		ArchivePolicy:   ArchivePolicyHooked,
 		PreArchiveHook:  `printf "$DPS_HOOK_PHASE:$DPS_ARCHIVE_OPERATION:$DPS_ARCHIVE_ARTIFACT:$DPS_VOLUME_NAME\n" >> "` + hookLog + `"`,
 		PostArchiveHook: `printf "$DPS_HOOK_PHASE:$DPS_ARCHIVE_OPERATION:$DPS_ARCHIVE_ARTIFACT:$DPS_VOLUME_NAME\n" >> "` + hookLog + `"`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
 
 	if _, err := d.Create("data", nil); err != nil {
 		t.Fatal(err)
@@ -204,21 +174,13 @@ func TestHookedPolicyRunsHooksForMountedSnapshot(t *testing.T) {
 }
 
 func TestHookedPolicyRunsPostHookAfterArchiveFailure(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
 	hookLog := filepath.Join(t.TempDir(), "hooks.log")
-	d, err := NewWithOptions(Options{
-		Root:            root,
-		MountRoot:       mountRoot,
-		PoolMode:        "none",
+	d := newTestDriver(t, Options{
+		DefaultSize:     "1g",
 		ArchivePolicy:   ArchivePolicyHooked,
 		PreArchiveHook:  `printf "$DPS_HOOK_PHASE\n" >> "` + hookLog + `"`,
 		PostArchiveHook: `printf "$DPS_HOOK_PHASE\n" >> "` + hookLog + `"`,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
 
 	v, err := d.Create("data", nil)
 	if err != nil {
@@ -240,19 +202,10 @@ func TestHookedPolicyRunsPostHookAfterArchiveFailure(t *testing.T) {
 }
 
 func TestDefaultLimitsAreApplied(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := NewWithOptions(Options{
-		Root:          root,
-		MountRoot:     mountRoot,
-		PoolMode:      "none",
+	d := newTestDriver(t, Options{
 		DefaultSize:   "10g",
 		DefaultInodes: "200000",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
 
 	v, err := d.Create("defaulted", nil)
 	if err != nil {
@@ -264,19 +217,10 @@ func TestDefaultLimitsAreApplied(t *testing.T) {
 }
 
 func TestDriverOptionsOverrideDefaultLimits(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := NewWithOptions(Options{
-		Root:          root,
-		MountRoot:     mountRoot,
-		PoolMode:      "none",
+	d := newTestDriver(t, Options{
 		DefaultSize:   "10g",
 		DefaultInodes: "200000",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
 
 	v, err := d.Create("custom", map[string]string{"size": "1g", "inodes": "1000"})
 	if err != nil {
@@ -287,39 +231,18 @@ func TestDriverOptionsOverrideDefaultLimits(t *testing.T) {
 	}
 }
 
-func TestRequireLimitsRejectsUnboundedVolume(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := NewWithOptions(Options{
-		Root:          root,
-		MountRoot:     mountRoot,
-		PoolMode:      "none",
-		RequireLimits: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
+func TestCreateRejectsVolumeWithoutSize(t *testing.T) {
+	d := newTestDriver(t, Options{})
 
 	if _, err := d.Create("unbounded", nil); err == nil {
-		t.Fatal("expected strict mode to reject unbounded volume")
+		t.Fatal("expected volume without size to be rejected")
 	}
 }
 
-func TestRequireLimitsAcceptsDefaultSize(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "state")
-	mountRoot := filepath.Join(t.TempDir(), "mount")
-	d, err := NewWithOptions(Options{
-		Root:          root,
-		MountRoot:     mountRoot,
-		PoolMode:      "none",
-		DefaultSize:   "5g",
-		RequireLimits: true,
+func TestCreateAcceptsDefaultSize(t *testing.T) {
+	d := newTestDriver(t, Options{
+		DefaultSize: "5g",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Quota.DryRun = true
 
 	v, err := d.Create("bounded", nil)
 	if err != nil {
