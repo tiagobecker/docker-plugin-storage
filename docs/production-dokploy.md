@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 sudo bash install-dps.sh
 ```
 
-Default behavior:
+Default behavior without a block device:
 
 - Installs `dpsd` and `dpsctl` into `/usr/local/bin`.
 - Runs DPS as a host systemd service named `dpsd`.
@@ -31,30 +31,53 @@ Default behavior:
 - Sets default volume limits to `10G` and `200000` inodes.
 - Requires limits by default with `DPS_REQUIRE_LIMITS=true`.
 
-For the recommended production-like XFS path, prepare `/mnt/dps` first using the next section, then run:
+For the recommended production-like XFS path on a new dedicated cloud disk, identify the disk first:
+
+```sh
+lsblk -f
+```
+
+Then run the installer with an explicit device. This example formats `/dev/vdb`, mounts it at `/mnt/dps`, writes `/etc/fstab`, and starts DPS in direct XFS mode:
 
 ```sh
 sudo env \
+  DPS_XFS_DEVICE=/dev/vdb \
+  DPS_FORMAT_XFS=true \
   DPS_POOL_MODE=direct \
   DPS_MOUNT_ROOT=/mnt/dps \
-  DPS_DEFAULT_VOLUME_SIZE=10G \
-  DPS_DEFAULT_VOLUME_INODES=200000 \
+  bash install-dps.sh
+```
+
+Warning: `DPS_FORMAT_XFS=true` destroys existing data on `DPS_XFS_DEVICE`. Use only a dedicated empty disk or partition.
+
+If the device is already formatted as XFS and only needs to be mounted, omit `DPS_FORMAT_XFS=true`:
+
+```sh
+sudo env \
+  DPS_XFS_DEVICE=/dev/vdb1 \
+  DPS_POOL_MODE=direct \
+  DPS_MOUNT_ROOT=/mnt/dps \
   bash install-dps.sh
 ```
 
 For a different mount location:
 
 ```sh
-sudo env DPS_POOL_MODE=direct DPS_MOUNT_ROOT=/srv/dps bash install-dps.sh
+sudo env \
+  DPS_XFS_DEVICE=/dev/vdb \
+  DPS_FORMAT_XFS=true \
+  DPS_POOL_MODE=direct \
+  DPS_MOUNT_ROOT=/srv/dps \
+  bash install-dps.sh
 ```
 
-The installer is non-destructive: it does not format disks and refuses `DPS_POOL_MODE=direct` unless the mountpoint already is XFS with `prjquota` or `pquota`.
+The installer refuses `DPS_POOL_MODE=direct` unless the mountpoint is XFS with `prjquota` or `pquota`. It also refuses to format anything unless `DPS_XFS_DEVICE` and `DPS_FORMAT_XFS=true` are both provided.
 
 Run the script on every Dokploy-managed Docker server that should support `driver: dps`.
 
 ## 2. Prepare XFS
 
-Use a dedicated block device when possible. The example below uses `/dev/vdb`.
+This manual path is useful when you prefer to prepare storage yourself before running the installer. Use a dedicated block device when possible. The example below uses `/dev/vdb`.
 
 Warning: `mkfs.xfs` erases the target device.
 

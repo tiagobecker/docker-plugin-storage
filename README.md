@@ -64,6 +64,12 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 sudo bash install-dps.sh
 ```
 
+For the recommended direct XFS path with a dedicated empty cloud disk:
+
+```sh
+sudo env DPS_XFS_DEVICE=/dev/vdb DPS_FORMAT_XFS=true DPS_POOL_MODE=direct bash install-dps.sh
+```
+
 For a production-like Linux/Dokploy setup with a dedicated XFS mount, see [docs/production-dokploy.md](docs/production-dokploy.md).
 
 ## Host CLI
