@@ -1,4 +1,11 @@
-# Local Testing
+# DPS Local Testing
+
+<p align="center">
+  <img src="../assets/dps-logo.png" alt="Docker Plugin Storage" width="320">
+</p>
+
+Local testing should prove that Docker sees DPS as a real volume driver and
+that containers observe the requested storage boundaries.
 
 DPS uses one local backend: each Docker volume is an ext4 image file mounted through a loop device. Local tests should therefore validate:
 
@@ -10,7 +17,15 @@ DPS uses one local backend: each Docker volume is an ext4 image file mounted thr
 
 DPS returns the `data` subdirectory inside the mounted image to Docker, not the
 filesystem root. This keeps ext metadata such as `lost+found` away from
-database images that require an empty data directory.
+applications and database images that require an empty data directory.
+
+## Test Matrix
+
+| Environment | Recommended path | Notes |
+| --- | --- | --- |
+| Docker Desktop | Managed plugin package | Useful for quick local validation. |
+| Linux VM | Unmanaged `dpsd` process | Closest to production behavior. |
+| Dokploy/Coolify host | systemd service | Use the production installer. |
 
 ## Docker Desktop
 
@@ -52,7 +67,7 @@ docker volume rm dps_lab_data
 docker plugin rm -f dps-test:local
 ```
 
-## Linux VM
+## Linux VM Or Test Server
 
 Any rootful Linux VM with Docker is enough. The host root filesystem may be ext4.
 

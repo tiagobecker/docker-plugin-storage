@@ -1,8 +1,24 @@
-# Dokploy And Coolify Setup
+# DPS For Dokploy And Coolify
 
-This guide covers DPS on Docker hosts managed by Dokploy, Coolify, or a similar Compose-based PaaS.
+<p align="center">
+  <img src="../assets/dps-logo.png" alt="Docker Plugin Storage" width="320">
+</p>
 
-DPS is installed on the Docker host. Once installed, any Compose project on that host can request a limited volume with `driver: dps`.
+This guide covers production-style DPS installation on Docker hosts managed by
+Dokploy, Coolify, or a similar Compose-based PaaS.
+
+DPS is installed on the Docker host. Once installed, any Compose project on that
+host can request a limited volume with `driver: dps`.
+
+## Recommended Deployment Shape
+
+| Layer | Recommendation |
+| --- | --- |
+| Docker host | Install DPS once per host. |
+| PaaS app template | Declare `driver: dps` in the Compose volume. |
+| Volume size | Prefer explicit `driver_opts.size` for apps with known needs. |
+| Inodes | Set explicit `driver_opts.inodes` for apps that create many files. |
+| Backups | Stop writes or use tested hooks before snapshot/backup. |
 
 ## How DPS Mounts Volumes
 
@@ -16,7 +32,9 @@ Compose / PaaS
   -> Docker bind-mounts that clean data directory into the container
 ```
 
-The extra `data` directory is part of the design. It hides filesystem metadata such as `lost+found` from applications, while keeping the container inside the same limited filesystem.
+The extra `data` directory is part of the design. It hides filesystem metadata
+such as `lost+found` from applications, while keeping the container inside the
+same limited filesystem.
 
 ## Install On Ubuntu 24.04 arm64
 
@@ -36,7 +54,8 @@ Defaults:
 - `DPS_DEFAULT_VOLUME_INODES=200000`
 - `DPS_ARCHIVE_POLICY=offline`
 
-The installer prints a visible success/failure summary and creates a small test volume before reporting success.
+The installer prints a visible success/failure summary and creates a small test
+volume before reporting success.
 
 To place volume image files on another disk or directory:
 

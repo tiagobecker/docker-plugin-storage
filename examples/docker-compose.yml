@@ -3,8 +3,6 @@ services:
     image: postgres:16
     environment:
       POSTGRES_PASSWORD: example
-    storage_opt:
-      size: 12G
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -26,4 +24,3 @@ volumes:
     driver_opts:
       size: 5g
       inodes: "200000"
-
