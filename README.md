@@ -92,8 +92,8 @@ curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/m
 The installer:
 
 - validates the host and Docker connection;
-- installs the host packages DPS needs, waiting up to five minutes if APT is
-  already busy;
+- installs any missing host packages DPS needs, skipping APT when they are
+  already installed and waiting up to 15 minutes if APT is busy;
 - builds and installs `dpsd` and `dpsctl`;
 - registers the `dpsd` systemd service;
 - writes `/etc/dps/dpsd.env`;

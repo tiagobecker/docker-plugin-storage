@@ -55,9 +55,11 @@ Defaults:
 - `DPS_ARCHIVE_POLICY=offline`
 
 The installer prints a visible success/failure summary and creates a small test
-volume before reporting success. If another package manager process is active,
-the installer waits up to five minutes for APT to become available. Override
-that timeout with `DPS_APT_LOCK_TIMEOUT_SECONDS`.
+volume before reporting success. It skips APT when all required host packages
+are already installed. If a package is missing and another package manager
+process is active, the installer identifies that process dynamically and waits
+up to 15 minutes for APT to become available. Override that timeout with
+`DPS_APT_LOCK_TIMEOUT_SECONDS`.
 
 To place volume image files on another disk or directory:
 

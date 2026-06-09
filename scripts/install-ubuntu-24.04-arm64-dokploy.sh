@@ -24,7 +24,7 @@ DPS_ALLOW_UNSUPPORTED_OS="${DPS_ALLOW_UNSUPPORTED_OS:-false}"
 DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT="${DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT:-false}"
 DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS="${DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS:-true}"
 DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE="${DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE:-true}"
-DPS_APT_LOCK_TIMEOUT_SECONDS="${DPS_APT_LOCK_TIMEOUT_SECONDS:-300}"
+DPS_APT_LOCK_TIMEOUT_SECONDS="${DPS_APT_LOCK_TIMEOUT_SECONDS:-900}"
 DPS_APT_RETRY_INTERVAL_SECONDS="${DPS_APT_RETRY_INTERVAL_SECONDS:-5}"
 CURRENT_STEP="starting"
 
@@ -137,10 +137,31 @@ validate_apt_settings() {
   esac
 }
 
+report_apt_lock_holder() {
+  local output_file="$1"
+  local holder_pid
+
+  holder_pid="$(
+    sed -n 's/.*held by process \([0-9][0-9]*\).*/\1/p' "$output_file" |
+      head -n 1
+  )"
+  if [ "$holder_pid" = "" ]; then
+    log "APT is locked by another package manager process"
+    return 0
+  fi
+
+  log "APT lock holder detected dynamically (PID $holder_pid):"
+  if command -v ps >/dev/null 2>&1 && ps -p "$holder_pid" -o pid=,ppid=,etime=,stat=,args= 2>/dev/null; then
+    return 0
+  fi
+  log "process $holder_pid exited before its details could be inspected"
+}
+
 run_apt_get() {
   local description="$1"
   local elapsed
   local exit_code
+  local last_reported_at=-30
   local output_file
   local started_at="$SECONDS"
   shift
@@ -162,6 +183,11 @@ run_apt_get() {
     fi
 
     elapsed=$((SECONDS - started_at))
+    if [ $((elapsed - last_reported_at)) -ge 30 ]; then
+      report_apt_lock_holder "$output_file"
+      last_reported_at="$elapsed"
+    fi
+
     if [ "$elapsed" -ge "$DPS_APT_LOCK_TIMEOUT_SECONDS" ]; then
       log "$description failed after waiting ${elapsed}s for APT to become available"
       rm -f "$output_file"
@@ -173,16 +199,32 @@ run_apt_get() {
   done
 }
 
+host_package_is_installed() {
+  dpkg-query -W -f='${db:Status-Abbrev}\n' "$1" 2>/dev/null | grep -qx 'ii '
+}
+
 install_packages() {
+  local -a missing_packages
+  local package
+
   section "Install host packages"
   validate_apt_settings
-  log "installing host packages; waiting up to ${DPS_APT_LOCK_TIMEOUT_SECONDS}s if APT is busy"
+  missing_packages=()
+  for package in ca-certificates e2fsprogs git util-linux; do
+    if ! host_package_is_installed "$package"; then
+      missing_packages[${#missing_packages[@]}]="$package"
+    fi
+  done
+
+  if [ "${#missing_packages[@]}" -eq 0 ]; then
+    success "Required host packages are already installed; skipping APT"
+    return 0
+  fi
+
+  log "missing host packages: ${missing_packages[*]}"
+  log "waiting up to ${DPS_APT_LOCK_TIMEOUT_SECONDS}s if APT is busy"
   run_apt_get "apt-get update" update
-  DEBIAN_FRONTEND=noninteractive run_apt_get "apt-get install" install -y \
-    ca-certificates \
-    e2fsprogs \
-    git \
-    util-linux
+  DEBIAN_FRONTEND=noninteractive run_apt_get "apt-get install" install -y "${missing_packages[@]}"
 }
 
 check_docker() {
