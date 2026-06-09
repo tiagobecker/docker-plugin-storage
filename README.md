@@ -393,14 +393,14 @@ Operational notes:
 If a PaaS UI reports only a generic Compose error, collect host diagnostics:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o diagnose-dokploy-dps.sh
-sudo bash diagnose-dokploy-dps.sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o /tmp/diagnose-dokploy-dps.sh &&
+  sudo bash /tmp/diagnose-dokploy-dps.sh
 ```
 
 Include a small DPS create/mount/remove test:
 
 ```sh
-sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash diagnose-dokploy-dps.sh
+sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash /tmp/diagnose-dokploy-dps.sh
 ```
 
 ## Uninstall
@@ -410,24 +410,24 @@ preserving Dokploy/Coolify apps, containers, Docker volumes, and DPS image data
 by default.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
-sudo bash uninstall-dps-host.sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o /tmp/uninstall-dps-host.sh &&
+  sudo bash /tmp/uninstall-dps-host.sh
 ```
 
 Non-interactive:
 
 ```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps bash uninstall-dps-host.sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps bash /tmp/uninstall-dps-host.sh
 ```
 
 Optional data removal requires explicit opt-in:
 
 ```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash uninstall-dps-host.sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash /tmp/uninstall-dps-host.sh
 ```
 
 Optional Docker volume metadata removal also requires explicit opt-in:
 
 ```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=true bash uninstall-dps-host.sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=true bash /tmp/uninstall-dps-host.sh
 ```

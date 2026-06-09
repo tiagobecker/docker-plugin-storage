@@ -446,7 +446,7 @@ Validation:
   docker plugin ls
 
 To remove DPS data too, run explicitly:
-  sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash uninstall-dps-host.sh
+  sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash "$0"
 
 ======================================================================
 

@@ -212,26 +212,26 @@ dpsctl --archive-policy hooked \
 The uninstall script removes DPS software and integration points by default, but preserves apps, containers, Docker volumes, and DPS volume image data.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
-sudo bash uninstall-dps-host.sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o /tmp/uninstall-dps-host.sh &&
+  sudo bash /tmp/uninstall-dps-host.sh
 ```
 
 Non-interactive:
 
 ```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps bash uninstall-dps-host.sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps bash /tmp/uninstall-dps-host.sh
 ```
 
 Optional data removal:
 
 ```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash uninstall-dps-host.sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DATA=true bash /tmp/uninstall-dps-host.sh
 ```
 
 Optional Docker volume metadata removal:
 
 ```sh
-sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=true bash uninstall-dps-host.sh
+sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=true bash /tmp/uninstall-dps-host.sh
 ```
 
 ## Diagnose Deploy Failures
@@ -239,14 +239,14 @@ sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_REMOVE_DOCKER_VOLUMES=tru
 When the PaaS UI reports only a generic Compose failure, collect host diagnostics:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o diagnose-dokploy-dps.sh
-sudo bash diagnose-dokploy-dps.sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/diagnose-dokploy-dps.sh -o /tmp/diagnose-dokploy-dps.sh &&
+  sudo bash /tmp/diagnose-dokploy-dps.sh
 ```
 
 Optional DPS driver test:
 
 ```sh
-sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash diagnose-dokploy-dps.sh
+sudo env DPS_DIAG_RUN_VOLUME_TEST=true bash /tmp/diagnose-dokploy-dps.sh
 ```
 
 Common causes:

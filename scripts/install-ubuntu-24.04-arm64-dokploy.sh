@@ -257,8 +257,8 @@ This installer runs DPS as an unmanaged host service using the driver name "dps"
 Remove old managed DPS plugins first, or set DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT=true if you know this is intentional.
 
 Recommended cleanup on disposable test hosts:
-  curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o uninstall-dps-host.sh
-  sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_RESTART_DOCKER=true bash uninstall-dps-host.sh
+  curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/uninstall-dps-host.sh -o /tmp/uninstall-dps-host.sh &&
+    sudo env DPS_UNINSTALL_CONFIRM=erase-dps DPS_UNINSTALL_RESTART_DOCKER=true bash /tmp/uninstall-dps-host.sh
 EOF
     exit 1
   fi
