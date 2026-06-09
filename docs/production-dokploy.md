@@ -41,8 +41,8 @@ same limited filesystem.
 Run this on each Docker host that should support DPS volumes:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
-sudo bash install-dps.sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o /tmp/install-dps.sh &&
+  sudo bash /tmp/install-dps.sh
 ```
 
 Defaults:
@@ -55,18 +55,20 @@ Defaults:
 - `DPS_ARCHIVE_POLICY=offline`
 
 The installer prints a visible success/failure summary and creates a small test
-volume before reporting success.
+volume before reporting success. If another package manager process is active,
+the installer waits up to five minutes for APT to become available. Override
+that timeout with `DPS_APT_LOCK_TIMEOUT_SECONDS`.
 
 To place volume image files on another disk or directory:
 
 ```sh
-sudo env DPS_IMAGE_ROOT=/srv/dps-images bash install-dps.sh
+sudo env DPS_IMAGE_ROOT=/srv/dps-images bash /tmp/install-dps.sh
 ```
 
 To change the default volume size:
 
 ```sh
-sudo env DPS_DEFAULT_VOLUME_SIZE=2G bash install-dps.sh
+sudo env DPS_DEFAULT_VOLUME_SIZE=2G bash /tmp/install-dps.sh
 ```
 
 ## Validate The Service

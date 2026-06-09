@@ -85,14 +85,15 @@ presenting the DPS image file as a block device.
 Install on an Ubuntu 24.04 arm64 host with Docker already installed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o install-dps.sh
-sudo bash install-dps.sh
+curl -fsSL https://raw.githubusercontent.com/tiagobecker/docker-plugin-storage/main/scripts/install-ubuntu-24.04-arm64-dokploy.sh -o /tmp/install-dps.sh &&
+  sudo bash /tmp/install-dps.sh
 ```
 
 The installer:
 
 - validates the host and Docker connection;
-- installs the host packages DPS needs;
+- installs the host packages DPS needs, waiting up to five minutes if APT is
+  already busy;
 - builds and installs `dpsd` and `dpsctl`;
 - registers the `dpsd` systemd service;
 - writes `/etc/dps/dpsd.env`;
@@ -113,13 +114,13 @@ DPS_ARCHIVE_POLICY=offline
 Place volume image files on another disk or directory:
 
 ```sh
-sudo env DPS_IMAGE_ROOT=/srv/dps-images bash install-dps.sh
+sudo env DPS_IMAGE_ROOT=/srv/dps-images bash /tmp/install-dps.sh
 ```
 
 Change the host-wide default size:
 
 ```sh
-sudo env DPS_DEFAULT_VOLUME_SIZE=2G bash install-dps.sh
+sudo env DPS_DEFAULT_VOLUME_SIZE=2G bash /tmp/install-dps.sh
 ```
 
 ## Compose Usage

@@ -24,6 +24,8 @@ DPS_ALLOW_UNSUPPORTED_OS="${DPS_ALLOW_UNSUPPORTED_OS:-false}"
 DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT="${DPS_INSTALL_ALLOW_MANAGED_PLUGIN_CONFLICT:-false}"
 DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS="${DPS_INSTALL_REMOVE_STALE_PLUGIN_SPECS:-true}"
 DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE="${DPS_INSTALL_ROLLBACK_ON_TEST_FAILURE:-true}"
+DPS_APT_LOCK_TIMEOUT_SECONDS="${DPS_APT_LOCK_TIMEOUT_SECONDS:-300}"
+DPS_APT_RETRY_INTERVAL_SECONDS="${DPS_APT_RETRY_INTERVAL_SECONDS:-5}"
 CURRENT_STEP="starting"
 
 banner() {
@@ -126,11 +128,57 @@ check_arch() {
   [ "$arch" = "arm64" ] || die "expected arm64/aarch64; got $arch"
 }
 
+validate_apt_settings() {
+  case "$DPS_APT_LOCK_TIMEOUT_SECONDS" in
+    ''|*[!0-9]*) die "DPS_APT_LOCK_TIMEOUT_SECONDS must be a non-negative integer" ;;
+  esac
+  case "$DPS_APT_RETRY_INTERVAL_SECONDS" in
+    ''|0|*[!0-9]*) die "DPS_APT_RETRY_INTERVAL_SECONDS must be a positive integer" ;;
+  esac
+}
+
+run_apt_get() {
+  local description="$1"
+  local elapsed
+  local exit_code
+  local output_file
+  local started_at="$SECONDS"
+  shift
+  output_file="$(mktemp)"
+
+  while true; do
+    if LC_ALL=C apt-get \
+      -o "DPkg::Lock::Timeout=$DPS_APT_RETRY_INTERVAL_SECONDS" \
+      "$@" 2>&1 | tee "$output_file"; then
+      rm -f "$output_file"
+      return 0
+    else
+      exit_code="${PIPESTATUS[0]}"
+    fi
+
+    if ! grep -Eq 'Could not get lock|Unable to lock directory|Unable to acquire the dpkg frontend lock' "$output_file"; then
+      rm -f "$output_file"
+      return "$exit_code"
+    fi
+
+    elapsed=$((SECONDS - started_at))
+    if [ "$elapsed" -ge "$DPS_APT_LOCK_TIMEOUT_SECONDS" ]; then
+      log "$description failed after waiting ${elapsed}s for APT to become available"
+      rm -f "$output_file"
+      return "$exit_code"
+    fi
+
+    log "$description could not run; APT may be busy. Retrying in ${DPS_APT_RETRY_INTERVAL_SECONDS}s (${elapsed}s elapsed)"
+    sleep "$DPS_APT_RETRY_INTERVAL_SECONDS"
+  done
+}
+
 install_packages() {
   section "Install host packages"
-  log "installing host packages"
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  validate_apt_settings
+  log "installing host packages; waiting up to ${DPS_APT_LOCK_TIMEOUT_SECONDS}s if APT is busy"
+  run_apt_get "apt-get update" update
+  DEBIAN_FRONTEND=noninteractive run_apt_get "apt-get install" install -y \
     ca-certificates \
     e2fsprogs \
     git \
